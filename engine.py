@@ -256,6 +256,28 @@ def run_refresh():
     approved = risk_filter(analyses)
     approved_ids = {p["mlb_game_id"] for p in approved}
 
+    # ── Update analysis_log with latest analysis (lineups may now be confirmed) ──
+    today = date.today().isoformat()
+    for a in analyses:
+        ou = a.get("ou_pick") or {}
+        db.save_analysis_log({
+            "game_date": today,
+            "mlb_game_id": a["mlb_game_id"],
+            "game": a["game"],
+            "away_team": a["away_team"],
+            "home_team": a["home_team"],
+            "away_pitcher": a.get("away_pitcher", "TBD"),
+            "home_pitcher": a.get("home_pitcher", "TBD"),
+            "composite_score": a["composite_score"],
+            "ml_pick_team": a["ml_pick_team"],
+            "ml_win_probability": a["ml_win_probability"],
+            "ml_confidence": a["ml_confidence"],
+            "ou_pick": ou.get("pick"),
+            "ou_line": ou.get("line"),
+            "ou_confidence": ou.get("confidence"),
+        })
+    print(f"[DB] Updated {len(analyses)} game analyses in analysis_log.")
+
     print(f"\nComparing {len(sent_picks)} sent picks against refreshed analysis...")
     updates_sent = 0
 
