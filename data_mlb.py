@@ -124,14 +124,15 @@ def fetch_todays_games(target_date: str = None) -> list:
 # MLB Stats API — Pitcher Season Stats
 # ──────────────────────────────────────────────
 
-def fetch_pitcher_stats(pitcher_mlb_id: int) -> dict:
+def fetch_pitcher_stats(pitcher_mlb_id: int, season: int = None) -> dict:
     """Fetch season stats for a pitcher from MLB Stats API."""
     if not pitcher_mlb_id:
         return {}
 
+    _season = season or SEASON_YEAR
     url = (
         f"{MLB_BASE}/people/{pitcher_mlb_id}"
-        f"?hydrate=stats(group=[pitching],type=[season],season={SEASON_YEAR})"
+        f"?hydrate=stats(group=[pitching],type=[season],season={_season})"
     )
     try:
         resp = requests.get(url, timeout=15)
@@ -225,11 +226,12 @@ def fetch_pitcher_rest(pitcher_id: int):
 # MLB Stats API — Team Batting Stats
 # ──────────────────────────────────────────────
 
-def fetch_team_batting(team_mlb_id: int) -> dict:
+def fetch_team_batting(team_mlb_id: int, season: int = None) -> dict:
     """Fetch team season batting stats."""
+    _season = season or SEASON_YEAR
     url = (
         f"{MLB_BASE}/teams/{team_mlb_id}/stats"
-        f"?stats=season&group=hitting&season={SEASON_YEAR}"
+        f"?stats=season&group=hitting&season={_season}"
     )
     try:
         resp = requests.get(url, timeout=15)
@@ -262,11 +264,12 @@ def fetch_team_batting(team_mlb_id: int) -> dict:
 # MLB Stats API — Team Pitching (Bullpen proxy)
 # ──────────────────────────────────────────────
 
-def fetch_team_pitching(team_mlb_id: int) -> dict:
+def fetch_team_pitching(team_mlb_id: int, season: int = None) -> dict:
     """Fetch team season pitching stats (used as bullpen proxy)."""
+    _season = season or SEASON_YEAR
     url = (
         f"{MLB_BASE}/teams/{team_mlb_id}/stats"
-        f"?stats=season&group=pitching&season={SEASON_YEAR}"
+        f"?stats=season&group=pitching&season={_season}"
     )
     try:
         resp = requests.get(url, timeout=15)
@@ -296,9 +299,10 @@ def fetch_team_pitching(team_mlb_id: int) -> dict:
 # MLB Stats API — Team Recent Record (momentum)
 # ──────────────────────────────────────────────
 
-def fetch_team_record(team_mlb_id: int) -> dict:
+def fetch_team_record(team_mlb_id: int, season: int = None) -> dict:
     """Fetch team's season record for win streaks etc."""
-    url = f"{MLB_BASE}/teams/{team_mlb_id}?hydrate=record&season={SEASON_YEAR}"
+    _season = season or SEASON_YEAR
+    url = f"{MLB_BASE}/teams/{team_mlb_id}?hydrate=record&season={_season}"
     try:
         resp = requests.get(url, timeout=15)
         resp.raise_for_status()
@@ -519,19 +523,20 @@ def _fetch_savant_csv(url: str) -> list:
         return []
 
 
-def fetch_statcast_team_batting() -> dict:
+def fetch_statcast_team_batting(season: int = None) -> dict:
     """
     Team batting Statcast metrics from Baseball Savant (one call/day).
     Returns dict keyed by team abbreviation e.g. 'NYY', 'LAD'.
     Metrics: xwoba, woba, woba_diff (luck), hard_hit_pct, barrel_pct, avg_exit_velo.
     """
-    cache_key = f"sc_bat_{date.today().isoformat()}"
+    _season = season or SEASON_YEAR
+    cache_key = f"sc_bat_{_season}" if season else f"sc_bat_{date.today().isoformat()}"
     if cache_key in _statcast_cache:
         return _statcast_cache[cache_key]
 
     url = (
         f"{SAVANT_BASE}/statcast_search/csv"
-        f"?hfGT=R%7C&hfSea={SEASON_YEAR}%7C&player_type=batter&group_by=team&min_pas=0"
+        f"?hfGT=R%7C&hfSea={_season}%7C&player_type=batter&group_by=team&min_pas=0"
     )
     rows = _fetch_savant_csv(url)
     result = {}
@@ -553,19 +558,20 @@ def fetch_statcast_team_batting() -> dict:
     return result
 
 
-def fetch_statcast_team_pitching() -> dict:
+def fetch_statcast_team_pitching(season: int = None) -> dict:
     """
     Team pitching Statcast metrics from Baseball Savant (one call/day).
     Returns dict keyed by team abbreviation.
     Metrics: xwoba_against, hard_hit allowed, barrel allowed, exit velo allowed.
     """
-    cache_key = f"sc_pit_{date.today().isoformat()}"
+    _season = season or SEASON_YEAR
+    cache_key = f"sc_pit_{_season}" if season else f"sc_pit_{date.today().isoformat()}"
     if cache_key in _statcast_cache:
         return _statcast_cache[cache_key]
 
     url = (
         f"{SAVANT_BASE}/statcast_search/csv"
-        f"?hfGT=R%7C&hfSea={SEASON_YEAR}%7C&player_type=pitcher&group_by=team&min_pas=0"
+        f"?hfGT=R%7C&hfSea={_season}%7C&player_type=pitcher&group_by=team&min_pas=0"
     )
     rows = _fetch_savant_csv(url)
     result = {}
@@ -586,20 +592,21 @@ def fetch_statcast_team_pitching() -> dict:
     return result
 
 
-def fetch_statcast_pitcher_xera() -> dict:
+def fetch_statcast_pitcher_xera(season: int = None) -> dict:
     """
     Pitcher xERA and regression signals from Baseball Savant (one call/day).
     Returns dict keyed by MLB player_id (int).
     era_minus_xera: negative = ERA < xERA = pitcher getting lucky (expect regression up).
                     positive = ERA > xERA = pitcher getting unlucky (expect improvement).
     """
-    cache_key = f"sc_sp_{date.today().isoformat()}"
+    _season = season or SEASON_YEAR
+    cache_key = f"sc_sp_{_season}" if season else f"sc_sp_{date.today().isoformat()}"
     if cache_key in _statcast_cache:
         return _statcast_cache[cache_key]
 
     url = (
         f"{SAVANT_BASE}/leaderboard/expected_statistics"
-        f"?type=pitcher&year={SEASON_YEAR}&position=&team=&min=0&csv=true"
+        f"?type=pitcher&year={_season}&position=&team=&min=0&csv=true"
     )
     rows = _fetch_savant_csv(url)
     result = {}
