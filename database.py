@@ -288,6 +288,34 @@ def mark_pick_sent(pick_id: int):
     conn.close()
 
 
+def save_analysis_log(entry: dict) -> int:
+    """Log one game's full analysis. Called for every game each daily run."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    ou_status = "none" if not entry.get("ou_pick") else "pending"
+    c = conn.execute("""
+        INSERT INTO analysis_log
+        (game_date, mlb_game_id, game, away_team, home_team,
+         away_pitcher, home_pitcher, composite_score,
+         ml_pick_team, ml_win_probability, ml_confidence,
+         ou_pick, ou_line, ou_confidence,
+         ml_status, ou_status, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        entry["game_date"], entry["mlb_game_id"], entry["game"],
+        entry["away_team"], entry["home_team"],
+        entry.get("away_pitcher", "TBD"), entry.get("home_pitcher", "TBD"),
+        entry.get("composite_score", 0.0),
+        entry["ml_pick_team"], entry["ml_win_probability"], entry["ml_confidence"],
+        entry.get("ou_pick"), entry.get("ou_line"), entry.get("ou_confidence"),
+        "pending", ou_status, now, now
+    ))
+    conn.commit()
+    row_id = c.lastrowid
+    conn.close()
+    return row_id
+
+
 # ── Game CRUD ────────────────────────────────────────────
 
 def upsert_game(game: dict) -> int:
