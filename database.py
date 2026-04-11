@@ -199,7 +199,8 @@ def init_db():
         actual_home_score INTEGER,
         actual_total INTEGER,
         created_at TEXT,
-        updated_at TEXT
+        updated_at TEXT,
+        UNIQUE(game_date, mlb_game_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
@@ -294,7 +295,7 @@ def save_analysis_log(entry: dict) -> int:
     now = datetime.utcnow().isoformat()
     ou_status = "none" if not entry.get("ou_pick") else "pending"
     c = conn.execute("""
-        INSERT INTO analysis_log
+        INSERT OR IGNORE INTO analysis_log
         (game_date, mlb_game_id, game, away_team, home_team,
          away_pitcher, home_pitcher, composite_score,
          ml_pick_team, ml_win_probability, ml_confidence,
