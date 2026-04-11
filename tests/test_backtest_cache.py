@@ -76,6 +76,15 @@ def test_save_and_load_statcast_batting(tmp_cache):
     assert loaded["NYY"]["xwoba"] == 0.330
 
 
+def test_statcast_pitchers_int_key_roundtrip(tmp_cache):
+    """save_statcast_pitchers stores int keys as strings; load_statcast_pitchers converts back to int."""
+    tmp_cache.save_statcast_pitchers(2024, {12345: {"era": 3.50, "xera": 3.20}})
+    loaded = tmp_cache.load_statcast_pitchers(2024)
+    assert 12345 in loaded
+    assert isinstance(list(loaded.keys())[0], int)
+    assert loaded[12345]["era"] == 3.50
+
+
 def test_season_games_cached_flag(tmp_cache):
     assert not tmp_cache.is_season_games_cached(2024)
     tmp_cache.save_season_games(2024, [{"mlb_game_id": 1, "season": 2024, "game_date": "2024-04-01",
@@ -152,3 +161,8 @@ def test_fetch_season_schedule_returns_completed_games():
         games = data_mlb.fetch_season_schedule(2024)
     assert len(games) == 1
     assert games[0]["home_team_won"] is True
+    assert games[0]["mlb_game_id"] == 1001
+    assert games[0]["away_score"] == 3
+    assert games[0]["home_score"] == 5
+    assert games[0]["away_pitcher_id"] == 5001
+    assert games[0]["season"] == 2024
