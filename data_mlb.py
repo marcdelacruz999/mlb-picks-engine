@@ -21,7 +21,10 @@ def _parse_ip(ip_str) -> float:
     Convert MLB API innings-pitched string to decimal innings.
     '6.2' means 6 full innings + 2 outs = 6 + 2/3 = 6.667.
     '3.0' means 3 full innings = 3.0.
+    Returns 0.0 for invalid input.
     """
+    if isinstance(ip_str, (int, float)):
+        return float(ip_str)  # already decimal, return as-is
     try:
         s = str(ip_str).strip()
         if not s or s in ("None", ""):
@@ -29,6 +32,8 @@ def _parse_ip(ip_str) -> float:
         parts = s.split(".")
         innings = int(parts[0])
         outs = int(parts[1]) if len(parts) > 1 else 0
+        if outs > 2:
+            return 0.0  # invalid out count — MLB API shouldn't emit this
         return innings + outs / 3.0
     except Exception:
         return 0.0

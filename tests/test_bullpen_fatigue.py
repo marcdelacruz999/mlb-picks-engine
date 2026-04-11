@@ -128,3 +128,65 @@ def test_fetch_bullpen_recent_usage_api_error_returns_zeros():
         result = data_mlb.fetch_bullpen_recent_usage(147)
 
     assert result == {"ip_last_3": 0.0, "ip_last_5": 0.0, "games_last_3": 0, "games_last_5": 0}
+
+
+def test_fetch_bullpen_recent_usage_3day_vs_5day_boundary():
+    """A game 4 days ago counts in ip_last_5 but NOT in ip_last_3."""
+    import data_mlb
+    today = date(2026, 4, 15)
+
+    # Game 2 days ago: 3.0 IP from relievers
+    game_2d = date(2026, 4, 13).isoformat()
+    # Game 4 days ago: 4.0 IP from relievers
+    game_4d = date(2026, 4, 11).isoformat()
+
+    fake_resp = {
+        "dates": [
+            {
+                "date": game_2d,
+                "games": [{
+                    "status": {"abstractGameState": "Final"},
+                    "teams": {
+                        "home": {
+                            "pitchers": [100, 101],
+                            "players": {
+                                "ID100": {"stats": {"pitching": {"inningsPitched": "5.0"}}},
+                                "ID101": {"stats": {"pitching": {"inningsPitched": "3.0"}}},
+                            },
+                            "team": {"id": 147},
+                        },
+                        "away": {"pitchers": [], "players": {}, "team": {"id": 9999}},
+                    },
+                }],
+            },
+            {
+                "date": game_4d,
+                "games": [{
+                    "status": {"abstractGameState": "Final"},
+                    "teams": {
+                        "home": {
+                            "pitchers": [200, 201],
+                            "players": {
+                                "ID200": {"stats": {"pitching": {"inningsPitched": "5.0"}}},
+                                "ID201": {"stats": {"pitching": {"inningsPitched": "4.0"}}},
+                            },
+                            "team": {"id": 147},
+                        },
+                        "away": {"pitchers": [], "players": {}, "team": {"id": 9999}},
+                    },
+                }],
+            },
+        ]
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = fake_resp
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("data_mlb.requests.get", return_value=mock_resp):
+        result = data_mlb.fetch_bullpen_recent_usage(147, as_of_date=today)
+
+    assert result["ip_last_3"] == pytest.approx(3.0)   # only the 2-day-ago game
+    assert result["ip_last_5"] == pytest.approx(7.0)   # both games: 3.0 + 4.0
+    assert result["games_last_3"] == 1
+    assert result["games_last_5"] == 2
