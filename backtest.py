@@ -155,8 +155,8 @@ def build_game_dict(game_row: dict, cache: BacktestCache) -> dict:
         "home_batting": home_bat,
         "away_pitching": away_pit,
         "home_pitching": home_pit,
-        "away_record": neutral_record,
-        "home_record": neutral_record,
+        "away_record": neutral_record.copy(),
+        "home_record": neutral_record.copy(),
 
         # Statcast
         "away_statcast_bat": sc_bat.get(game_row["away_team_abbr"], {}),
