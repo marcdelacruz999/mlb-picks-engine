@@ -15,6 +15,25 @@ from config import SEASON_YEAR
 
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
 
+
+def _parse_ip(ip_str) -> float:
+    """
+    Convert MLB API innings-pitched string to decimal innings.
+    '6.2' means 6 full innings + 2 outs = 6 + 2/3 = 6.667.
+    '3.0' means 3 full innings = 3.0.
+    """
+    try:
+        s = str(ip_str).strip()
+        if not s or s in ("None", ""):
+            return 0.0
+        parts = s.split(".")
+        innings = int(parts[0])
+        outs = int(parts[1]) if len(parts) > 1 else 0
+        return innings + outs / 3.0
+    except Exception:
+        return 0.0
+
+
 # ──────────────────────────────────────────────
 # MLB Stats API — Teams
 # ──────────────────────────────────────────────
@@ -299,6 +318,82 @@ def fetch_pitcher_rest(pitcher_id: int, season: int = None):
             except ValueError:
                 continue
     return None
+
+
+def fetch_bullpen_recent_usage(team_id: int, as_of_date=None) -> dict:
+    """
+    Returns recent bullpen workload for a team.
+    Fetches last 7 days of completed games, sums relief innings (all pitchers after the starter).
+    Returns: {
+        "ip_last_3": float,   # bullpen IP in last 3 days
+        "ip_last_5": float,   # bullpen IP in last 5 days
+        "games_last_3": int,  # games played in last 3 days
+        "games_last_5": int,  # games played in last 5 days
+    }
+    """
+    today = as_of_date or date.today()
+    start = today - timedelta(days=7)
+    end = today - timedelta(days=1)
+
+    url = (
+        f"{MLB_BASE}/schedule"
+        f"?teamId={team_id}&startDate={start}&endDate={end}"
+        f"&sportId=1&gameType=R&hydrate=boxscore"
+    )
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"[DATA] Error fetching bullpen usage for team {team_id}: {e}")
+        return {"ip_last_3": 0.0, "ip_last_5": 0.0, "games_last_3": 0, "games_last_5": 0}
+
+    games_seen = []
+
+    for date_entry in data.get("dates", []):
+        game_date_str = date_entry.get("date", "")
+        try:
+            game_date = date.fromisoformat(game_date_str)
+        except ValueError:
+            continue
+        days_ago = (today - game_date).days
+
+        for game in date_entry.get("games", []):
+            if game.get("status", {}).get("abstractGameState") != "Final":
+                continue
+
+            home_id = game.get("teams", {}).get("home", {}).get("team", {}).get("id")
+            away_id = game.get("teams", {}).get("away", {}).get("team", {}).get("id")
+            if team_id == home_id:
+                side = "home"
+            elif team_id == away_id:
+                side = "away"
+            else:
+                continue
+
+            team_data = game.get("teams", {}).get(side, {})
+            pitcher_ids = team_data.get("pitchers", [])
+            players = team_data.get("players", {})
+
+            relief_ip = 0.0
+            for pid in pitcher_ids[1:]:
+                player = players.get(f"ID{pid}", {})
+                ip_str = player.get("stats", {}).get("pitching", {}).get("inningsPitched", "0.0")
+                relief_ip += _parse_ip(ip_str)
+
+            games_seen.append({"days_ago": days_ago, "bullpen_ip": relief_ip})
+
+    ip_last_3 = sum(g["bullpen_ip"] for g in games_seen if g["days_ago"] <= 3)
+    ip_last_5 = sum(g["bullpen_ip"] for g in games_seen if g["days_ago"] <= 5)
+    games_last_3 = sum(1 for g in games_seen if g["days_ago"] <= 3)
+    games_last_5 = sum(1 for g in games_seen if g["days_ago"] <= 5)
+
+    return {
+        "ip_last_3": round(ip_last_3, 2),
+        "ip_last_5": round(ip_last_5, 2),
+        "games_last_3": games_last_3,
+        "games_last_5": games_last_5,
+    }
 
 
 # ──────────────────────────────────────────────
