@@ -735,6 +735,7 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
         "away_pitcher": game.get("away_pitcher_name", "TBD"),
         "home_pitcher": game.get("home_pitcher_name", "TBD"),
         "mlb_game_id": game.get("mlb_game_id"),
+        "game_time_utc": game.get("game_time_utc", ""),
         "lineup_status": lineup_status,
         "lineups_confirmed": lineups_confirmed,
 
@@ -890,65 +891,115 @@ def build_watchlist(analyses: list, approved: list) -> list:
     return watchlist[:5]
 
 
+def _calculate_ev(win_prob_pct: float, ml_odds) -> "float | None":
+    """
+    Calculate Expected Value per unit staked.
+    win_prob_pct: model's win probability (0-100 scale, e.g. 62.4)
+    ml_odds: American moneyline odds for the picked team (e.g. -150, +130)
+    Returns EV per $1 staked, or None if odds unavailable.
+
+    EV = (win_prob * payout_per_unit) - (loss_prob * 1.0)
+    payout_per_unit:
+      negative odds (e.g. -150): 100 / abs(odds)  → -150 → 0.667
+      positive odds (e.g. +130): odds / 100        → +130 → 1.30
+    """
+    if ml_odds is None:
+        return None
+    win_prob = win_prob_pct / 100.0
+    loss_prob = 1.0 - win_prob
+    if ml_odds < 0:
+        payout = 100.0 / abs(ml_odds)
+    else:
+        payout = ml_odds / 100.0
+    return round(win_prob * payout - loss_prob, 4)
+
+
 def risk_filter(analyses: list) -> list:
     """
     RISK AGENT — Only approve picks that meet strict quality thresholds.
     Returns approved picks, sorted by confidence.
     """
     approved = []
+    MIN_EV = -0.02  # allow slightly negative EV for high-confidence plays
 
     for a in analyses:
         # Moneyline pick evaluation
         if (a["ml_confidence"] >= MIN_CONFIDENCE and
                 a["ml_edge_score"] >= MIN_EDGE_SCORE):
-            approved.append({
-                "type": "moneyline",
-                "game": a["game"],
-                "away_team": a["away_team"],
-                "home_team": a["home_team"],
-                "pick_team": a["ml_pick_team"],
-                "pick_type": "moneyline",
-                "confidence": a["ml_confidence"],
-                "win_probability": a["ml_win_probability"],
-                "edge_score": a["ml_edge_score"],
-                "projected_away_score": a["projected_away_score"],
-                "projected_home_score": a["projected_home_score"],
-                "edge_pitching": a["agents"]["pitching"]["edge"],
-                "edge_offense": a["agents"]["offense"]["edge"],
-                "edge_advanced": a["agents"]["advanced"]["edge"],
-                "edge_bullpen": a["agents"]["bullpen"]["edge"],
-                "edge_weather": a["agents"]["weather"]["edge"],
-                "edge_market": a["agents"]["market"]["edge"],
-                "notes": a.get("lineup_status", ""),
-                "mlb_game_id": a["mlb_game_id"],
-                "analysis": a,
-            })
+
+            # EV gate for moneyline picks
+            market_detail = a["agents"]["market"]["detail"]
+            pick_ml_odds = (market_detail.get("home_ml") if a["ml_pick_side"] == "home"
+                            else market_detail.get("away_ml"))
+            ev = _calculate_ev(a["ml_win_probability"], pick_ml_odds)
+
+            if ev is not None and ev < MIN_EV:
+                print(f"[EV GATE] Rejected {a['ml_pick_team']} (conf {a['ml_confidence']}, "
+                      f"EV {ev:.4f} at {pick_ml_odds})")
+            else:
+                pick_dict = {
+                    "type": "moneyline",
+                    "game": a["game"],
+                    "away_team": a["away_team"],
+                    "home_team": a["home_team"],
+                    "pick_team": a["ml_pick_team"],
+                    "pick_type": "moneyline",
+                    "confidence": a["ml_confidence"],
+                    "win_probability": a["ml_win_probability"],
+                    "edge_score": a["ml_edge_score"],
+                    "projected_away_score": a["projected_away_score"],
+                    "projected_home_score": a["projected_home_score"],
+                    "edge_pitching": a["agents"]["pitching"]["edge"],
+                    "edge_offense": a["agents"]["offense"]["edge"],
+                    "edge_advanced": a["agents"]["advanced"]["edge"],
+                    "edge_bullpen": a["agents"]["bullpen"]["edge"],
+                    "edge_weather": a["agents"]["weather"]["edge"],
+                    "edge_market": a["agents"]["market"]["edge"],
+                    "notes": a.get("lineup_status", ""),
+                    "mlb_game_id": a["mlb_game_id"],
+                    "game_time_utc": a.get("game_time_utc", ""),
+                    "analysis": a,
+                    "ev_score": ev,
+                }
+                approved.append(pick_dict)
 
         # Over/Under pick evaluation
         ou = a.get("ou_pick", {})
         if ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE:
-            approved.append({
-                "type": "over_under",
-                "game": a["game"],
-                "away_team": a["away_team"],
-                "home_team": a["home_team"],
-                "pick_team": ou["pick"].upper(),
-                "pick_type": ou["pick"],
-                "confidence": ou["confidence"],
-                "win_probability": a["ml_win_probability"],
-                "edge_score": a["ml_edge_score"],
-                "projected_away_score": a["projected_away_score"],
-                "projected_home_score": a["projected_home_score"],
-                "edge_pitching": a["agents"]["pitching"]["edge"],
-                "edge_offense": a["agents"]["offense"]["edge"],
-                "edge_advanced": a["agents"]["advanced"]["edge"],
-                "edge_bullpen": a["agents"]["bullpen"]["edge"],
-                "edge_weather": a["agents"]["weather"]["edge"],
-                "edge_market": ou["edge"],
-                "notes": f"Total line: {ou.get('total_line', '?')} | {a.get('lineup_status', '')}",
-                "mlb_game_id": a["mlb_game_id"],
-                "analysis": a,
-            })
+            market_detail = a["agents"]["market"]["detail"]
+            ou_odds = (market_detail.get("over_price") if ou["pick"] == "over"
+                       else market_detail.get("under_price"))
+            ev_ou = _calculate_ev(a["ml_win_probability"], ou_odds)
+
+            if ev_ou is not None and ev_ou < MIN_EV:
+                print(f"[EV GATE] O/U rejected: {ou['pick'].upper()} "
+                      f"(conf {ou['confidence']}, EV {ev_ou:.4f} at {ou_odds})")
+            else:
+                ou_dict = {
+                    "type": "over_under",
+                    "game": a["game"],
+                    "away_team": a["away_team"],
+                    "home_team": a["home_team"],
+                    "pick_team": ou["pick"].upper(),
+                    "pick_type": ou["pick"],
+                    "confidence": ou["confidence"],
+                    "win_probability": a["ml_win_probability"],
+                    "edge_score": a["ml_edge_score"],
+                    "projected_away_score": a["projected_away_score"],
+                    "projected_home_score": a["projected_home_score"],
+                    "edge_pitching": a["agents"]["pitching"]["edge"],
+                    "edge_offense": a["agents"]["offense"]["edge"],
+                    "edge_advanced": a["agents"]["advanced"]["edge"],
+                    "edge_bullpen": a["agents"]["bullpen"]["edge"],
+                    "edge_weather": a["agents"]["weather"]["edge"],
+                    "edge_market": ou["edge"],
+                    "notes": f"Total line: {ou.get('total_line', '?')} | {a.get('lineup_status', '')}",
+                    "mlb_game_id": a["mlb_game_id"],
+                    "game_time_utc": a.get("game_time_utc", ""),
+                    "analysis": a,
+                    "ev_score": ev_ou,
+                }
+                approved.append(ou_dict)
 
     # Sort by confidence (highest first) and cap volume
     approved.sort(key=lambda x: x["confidence"], reverse=True)

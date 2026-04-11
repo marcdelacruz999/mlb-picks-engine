@@ -6,7 +6,8 @@ Sends pick alerts, updates, and daily recaps to a single Discord channel.
 
 import requests
 import json
-from datetime import date
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from config import DISCORD_WEBHOOK_URL
 
 
@@ -77,6 +78,20 @@ def send_results(results: dict) -> bool:
 #  MESSAGE FORMATTERS
 # ══════════════════════════════════════════════
 
+def _format_game_time(game_time_utc: str) -> str:
+    """Convert UTC ISO game time to Eastern time string, e.g. 'April 11, 2026 — 7:10 PM ET'."""
+    if not game_time_utc:
+        return ""
+    try:
+        dt_utc = datetime.fromisoformat(game_time_utc.replace("Z", "+00:00"))
+        dt_pt = dt_utc.astimezone(ZoneInfo("America/Los_Angeles"))
+        date_str = dt_pt.strftime("%B %d, %Y")
+        time_str = dt_pt.strftime("%-I:%M %p PT")
+        return f"{date_str} — {time_str}"
+    except Exception:
+        return ""
+
+
 def _format_pick_message(pick: dict) -> str:
     """Format a pick into the required Discord message structure."""
 
@@ -95,13 +110,25 @@ def _format_pick_message(pick: dict) -> str:
     # Build odds line from analysis data
     odds_str = _format_odds_line(pick)
 
+    game_time_str = _format_game_time(pick.get("game_time_utc", ""))
+
     msg = (
         f"🚨 **MLB HIGH-CONFIDENCE PICK**\n"
         f"\n"
         f"**Game:** {pick.get('game', '?')}\n"
+    )
+    if game_time_str:
+        msg += f"**Date/Time:** {game_time_str}\n"
+    msg += (
         f"**Pick:** {pick_display}\n"
         f"**Confidence:** {pick.get('confidence', '?')}/10\n"
         f"**Win Probability:** {pick.get('win_probability', '?')}%\n"
+    )
+    ev = pick.get("ev_score")
+    if ev is not None:
+        ev_str = f"{ev:+.3f}"
+        msg += f"**Expected Value:** {ev_str} per unit\n"
+    msg += (
         f"**Projected Score:** {pick.get('away_team', '?')} {pick.get('projected_away_score', '?')}"
         f" - {pick.get('home_team', '?')} {pick.get('projected_home_score', '?')}\n"
     )

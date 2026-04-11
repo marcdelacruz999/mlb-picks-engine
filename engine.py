@@ -192,6 +192,7 @@ def run_analysis(dry_run: bool = False):
             "edge_weather": pick["edge_weather"],
             "edge_market": pick["edge_market"],
             "notes": pick.get("notes", ""),
+            "ev_score": pick.get("ev_score"),
         }
         pick_id = db.save_pick(pick_record)
 
@@ -377,6 +378,7 @@ def run_results():
     picks = db.get_today_picks()
     if not picks:
         print("\nNo picks were made today. Nothing to grade.")
+        return
 
     wins, losses, pushes = 0, 0, 0
     best_pick = None
@@ -530,6 +532,11 @@ def run_results():
     print(f"  O/U: {log_ou_correct}W {log_ou_incorrect}L")
 
     total = wins + losses
+
+    if total == 0 and pushes == 0:
+        print("\nNo picks were newly graded (all already resolved or no final scores matched).")
+        return
+
     roi = round((wins - losses) / max(total, 1) * 100, 1)
 
     results = {

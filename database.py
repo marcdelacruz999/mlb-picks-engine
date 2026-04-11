@@ -157,6 +157,7 @@ def init_db():
         edge_weather TEXT,
         edge_market TEXT,
         notes TEXT,
+        ev_score REAL,
         status TEXT DEFAULT 'pending' CHECK(status IN ('pending','won','lost','push','cancelled')),
         discord_sent INTEGER DEFAULT 0,
         created_at TEXT,
@@ -211,6 +212,14 @@ def init_db():
     """)
 
     conn.commit()
+
+    # Migrate existing DB: add ev_score if not present
+    try:
+        conn.execute("ALTER TABLE picks ADD COLUMN ev_score REAL")
+        conn.commit()
+    except Exception:
+        pass  # column already exists
+
     conn.close()
     print("[DB] Database initialized.")
 
@@ -226,8 +235,8 @@ def save_pick(pick: dict) -> int:
         (game_id, pick_type, pick_team, confidence, win_probability,
          edge_score, projected_away_score, projected_home_score,
          edge_pitching, edge_offense, edge_advanced, edge_bullpen, edge_weather, edge_market,
-         notes, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         notes, ev_score, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         pick["game_id"], pick["pick_type"], pick.get("pick_team"),
         pick["confidence"], pick["win_probability"],
@@ -236,6 +245,7 @@ def save_pick(pick: dict) -> int:
         pick.get("edge_pitching"), pick.get("edge_offense"),
         pick.get("edge_advanced"), pick.get("edge_bullpen"), pick.get("edge_weather"),
         pick.get("edge_market"), pick.get("notes"),
+        pick.get("ev_score"),
         now, now
     ))
     conn.commit()
