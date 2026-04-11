@@ -245,3 +245,208 @@ def score_historical_games(game_rows: list, cache: BacktestCache) -> list:
 
     print(f"[BACKTEST] Scored {len(results)} games (skipped {total - len(results)} missing pitchers).")
     return results
+
+
+# ══════════════════════════════════════════════
+#  PHASE 3 — REPORTS
+# ══════════════════════════════════════════════
+
+def confidence_report(results: list) -> dict:
+    """
+    Win rate grouped by model confidence level.
+    Returns: {confidence_level: {"picks": N, "wins": N, "win_rate": float}}
+    """
+    if not results:
+        return {}
+
+    buckets = {}
+    for r in results:
+        conf = r["ml_confidence"]
+        if conf not in buckets:
+            buckets[conf] = {"picks": 0, "wins": 0}
+        buckets[conf]["picks"] += 1
+        if r["model_correct"]:
+            buckets[conf]["wins"] += 1
+
+    for conf, b in buckets.items():
+        b["win_rate"] = round(b["wins"] / b["picks"], 3) if b["picks"] > 0 else 0.0
+
+    return buckets
+
+
+def calibration_curve(results: list) -> list:
+    """
+    Bucket results by model-predicted win probability and compare to actual win rate.
+    Returns list of dicts sorted by prob_low.
+    Buckets: 50-55%, 55-60%, 60-65%, 65-70%, 70%+
+    """
+    if not results:
+        return []
+
+    buckets_def = [(50, 55), (55, 60), (60, 65), (65, 70), (70, 100)]
+    buckets = {lo: {"prob_low": lo, "prob_high": hi, "picks": 0, "wins": 0, "actual_win_rate": 0.0}
+               for lo, hi in buckets_def}
+
+    for r in results:
+        prob = r.get("ml_win_probability", 50.0)
+        for lo, hi in buckets_def:
+            if lo <= prob < hi:
+                buckets[lo]["picks"] += 1
+                if r["model_correct"]:
+                    buckets[lo]["wins"] += 1
+                break
+
+    for b in buckets.values():
+        b["actual_win_rate"] = round(b["wins"] / b["picks"], 3) if b["picks"] > 0 else 0.0
+
+    return [b for b in sorted(buckets.values(), key=lambda x: x["prob_low"]) if b["picks"] > 0]
+
+
+def agent_correlation(results: list) -> dict:
+    """
+    For each agent, split results into high-score games vs low-score games
+    and compare win rates. "Lift" = win_rate_high - win_rate_low.
+    High lift = agent is predictive. Low/negative lift = agent is noise.
+
+    High = agent score magnitude in top 50% of games. Low = bottom 50%.
+    """
+    if not results:
+        return {}
+
+    agents = ["pitching", "offense", "bullpen", "advanced", "momentum", "weather"]
+    corr = {}
+
+    for agent in agents:
+        scores = [abs(r["agent_scores"][agent]) for r in results if agent in r["agent_scores"]]
+        if not scores:
+            corr[agent] = {"win_rate_high": 0.0, "win_rate_low": 0.0, "lift": 0.0, "n_high": 0, "n_low": 0}
+            continue
+
+        median_score = sorted(scores)[len(scores) // 2]
+
+        high_wins = high_total = low_wins = low_total = 0
+        for r in results:
+            score_mag = abs(r["agent_scores"].get(agent, 0.0))
+            if score_mag >= median_score:
+                high_total += 1
+                if r["model_correct"]:
+                    high_wins += 1
+            else:
+                low_total += 1
+                if r["model_correct"]:
+                    low_wins += 1
+
+        win_rate_high = high_wins / high_total if high_total > 0 else 0.0
+        win_rate_low = low_wins / low_total if low_total > 0 else 0.0
+
+        corr[agent] = {
+            "win_rate_high": round(win_rate_high, 3),
+            "win_rate_low": round(win_rate_low, 3),
+            "lift": round(win_rate_high - win_rate_low, 3),
+            "n_high": high_total,
+            "n_low": low_total,
+        }
+
+    return corr
+
+
+def suggest_weights(corr: dict) -> dict:
+    """
+    Derive recommended weights from agent_correlation lift scores.
+    Market agent weight is held constant (not backtestable without historical odds).
+    Suggested weights for the 6 backtestable agents are scaled by their lift,
+    floored at 0.01, then normalized to sum to (1 - market_weight).
+    """
+    market_weight = WEIGHTS["market"]
+    remaining = 1.0 - market_weight
+
+    agents = ["pitching", "offense", "bullpen", "advanced", "momentum", "weather"]
+
+    lifts = {a: corr[a]["lift"] for a in agents if a in corr}
+    if not lifts:
+        return WEIGHTS.copy()
+
+    min_lift = min(lifts.values())
+    shift = max(0, -min_lift) + 0.01
+    adjusted = {a: lifts[a] + shift for a in agents}
+
+    total_lift = sum(adjusted.values())
+    raw_weights = {a: adjusted[a] / total_lift * remaining for a in agents}
+
+    # Floor each agent at 0.01 and renormalize
+    floored = {a: max(0.01, raw_weights[a]) for a in agents}
+    floor_total = sum(floored.values())
+    normalized = {a: round(floored[a] / floor_total * remaining, 3) for a in agents}
+
+    # Adjust rounding error on largest weight
+    diff = round(remaining - sum(normalized.values()), 3)
+    max_agent = max(normalized, key=lambda a: normalized[a])
+    normalized[max_agent] = round(normalized[max_agent] + diff, 3)
+
+    normalized["market"] = market_weight
+    return normalized
+
+
+def print_reports(results: list):
+    """Print all four reports to stdout."""
+    print("\n" + "=" * 60)
+    print("  BACKTESTER RESULTS")
+    print("=" * 60)
+    print(f"  Total games scored: {len(results)}")
+    overall_correct = sum(1 for r in results if r["model_correct"])
+    if results:
+        print(f"  Overall win rate:   {overall_correct / len(results):.1%}")
+    print()
+
+    # Report 1: Confidence calibration
+    print("── WIN RATE BY CONFIDENCE LEVEL ──────────────────────────")
+    cal = confidence_report(results)
+    for conf in sorted(cal.keys(), reverse=True):
+        b = cal[conf]
+        bar = "█" * int(b["win_rate"] * 20)
+        print(f"  Conf {conf:2d}: {b['win_rate']:.1%}  ({b['wins']}/{b['picks']})  {bar}")
+    print()
+
+    # Report 2: Calibration curve
+    print("── CALIBRATION CURVE ──────────────────────────────────────")
+    print("  (Are high-confidence predictions actually more accurate?)")
+    curve = calibration_curve(results)
+    for b in curve:
+        bar = "█" * int(b["actual_win_rate"] * 20)
+        expected_mid = (b["prob_low"] + b["prob_high"]) / 2
+        diff = b["actual_win_rate"] * 100 - expected_mid
+        sign = "+" if diff >= 0 else ""
+        print(f"  {b['prob_low']:3d}-{b['prob_high']:3d}%: actual={b['actual_win_rate']:.1%}  "
+              f"({sign}{diff:.1f}pp vs model)  n={b['picks']}  {bar}")
+    print()
+
+    # Report 3: Agent correlation
+    print("── PER-AGENT SIGNAL LIFT ──────────────────────────────────")
+    print("  (Lift = win rate when agent fires vs when it doesn't)")
+    corr = agent_correlation(results)
+    for agent, data in sorted(corr.items(), key=lambda x: -x[1]["lift"]):
+        arrow = "▲" if data["lift"] > 0.02 else ("▼" if data["lift"] < -0.02 else "─")
+        print(f"  {agent:12s}: lift={data['lift']:+.3f}  {arrow}  "
+              f"high={data['win_rate_high']:.1%} (n={data['n_high']})  "
+              f"low={data['win_rate_low']:.1%} (n={data['n_low']})")
+    print()
+
+    # Report 4: Suggested weights
+    suggested = suggest_weights(corr)
+    print("── SUGGESTED WEIGHT ADJUSTMENTS ───────────────────────────")
+    print(f"  {'Agent':12s}  {'Current':>8}  {'Suggested':>9}  {'Change':>7}")
+    print(f"  {'-'*12}  {'-'*8}  {'-'*9}  {'-'*7}")
+    for agent in ["pitching", "offense", "bullpen", "advanced", "momentum", "weather", "market"]:
+        current = WEIGHTS.get(agent, 0)
+        new = suggested.get(agent, current)
+        diff = new - current
+        arrow = "▲" if diff > 0.005 else ("▼" if diff < -0.005 else " ")
+        print(f"  {agent:12s}  {current:8.1%}  {new:9.1%}  {arrow}{abs(diff):6.1%}")
+
+    print()
+    print("── PASTE INTO config.py ────────────────────────────────────")
+    print("  WEIGHTS = {")
+    for agent, w in suggested.items():
+        print(f'      "{agent}": {w},')
+    print("  }")
+    print("=" * 60)

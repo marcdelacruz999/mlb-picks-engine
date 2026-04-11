@@ -178,3 +178,91 @@ def test_score_historical_games_skips_games_missing_pitchers(tmp_cache):
 
     results = backtest.score_historical_games(game_rows, cache=tmp_cache)
     assert len(results) == 0
+
+
+def _make_results(n_correct, n_total, confidence=8, agent_scores=None):
+    """Helper: produce a list of result dicts."""
+    results = []
+    for i in range(n_total):
+        correct = i < n_correct
+        scores = agent_scores or {"pitching": 0.3, "offense": 0.1, "bullpen": 0.05,
+                                   "advanced": 0.2, "momentum": 0.0, "weather": 0.0}
+        results.append({
+            "mlb_game_id": i,
+            "season": 2024,
+            "ml_confidence": confidence,
+            "ml_edge_score": 0.20,
+            "model_pick_side": "home",
+            "model_correct": correct,
+            "ml_win_probability": 62.0,
+            "agent_scores": scores,
+            "composite_score": 0.20,
+        })
+    return results
+
+
+def test_confidence_report_groups_by_confidence():
+    import backtest
+    results = _make_results(60, 100, confidence=8) + _make_results(55, 100, confidence=7)
+    report = backtest.confidence_report(results)
+    assert 7 in report
+    assert 8 in report
+    assert report[8]["picks"] == 100
+    assert report[8]["wins"] == 60
+    assert abs(report[8]["win_rate"] - 0.60) < 0.01
+
+
+def test_confidence_report_empty():
+    import backtest
+    assert backtest.confidence_report([]) == {}
+
+
+def test_agent_correlation_returns_dict_with_all_agents():
+    import backtest
+    results = _make_results(60, 100)
+    corr = backtest.agent_correlation(results)
+    for agent in ["pitching", "offense", "bullpen", "advanced", "momentum", "weather"]:
+        assert agent in corr
+        assert "win_rate_high" in corr[agent]
+        assert "win_rate_low" in corr[agent]
+        assert "lift" in corr[agent]
+
+
+def test_suggest_weights_sums_to_one():
+    import backtest
+    from config import WEIGHTS
+    results = _make_results(60, 100)
+    corr = backtest.agent_correlation(results)
+    suggested = backtest.suggest_weights(corr)
+    total = sum(v for k, v in suggested.items() if k != "market")
+    assert abs(total - (1.0 - WEIGHTS["market"])) < 0.001
+    assert "market" in suggested
+    assert suggested["market"] == WEIGHTS["market"]
+
+
+def test_suggest_weights_all_agents_present():
+    import backtest
+    results = _make_results(60, 100)
+    corr = backtest.agent_correlation(results)
+    suggested = backtest.suggest_weights(corr)
+    for agent in ["pitching", "offense", "bullpen", "advanced", "momentum", "weather", "market"]:
+        assert agent in suggested
+        assert suggested[agent] >= 0.01
+
+
+def test_calibration_curve_buckets_by_probability():
+    import backtest
+    results = []
+    for i in range(40):
+        results.append({
+            "ml_win_probability": 62.0,
+            "model_correct": i < 25,
+            "ml_confidence": 8, "ml_edge_score": 0.2,
+            "model_pick_side": "home", "agent_scores": {},
+            "composite_score": 0.2,
+        })
+    curve = backtest.calibration_curve(results)
+    assert len(curve) > 0
+    bucket = next(b for b in curve if b["prob_low"] <= 62 < b["prob_high"])
+    assert bucket["picks"] == 40
+    assert abs(bucket["actual_win_rate"] - 0.625) < 0.01
