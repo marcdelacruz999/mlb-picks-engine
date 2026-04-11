@@ -10,17 +10,19 @@ Usage:
     python3 engine.py --results    # Grade today's picks and send recap
     python3 engine.py --status     # Print current tracking snapshot
     python3 engine.py --test       # Dry run: analyze but don't send to Discord
+    python3 engine.py --game X     # Full analysis for game(s) matching team name X, sent to Discord
 """
 
 import sys
 import json
+import requests
 from datetime import date, datetime
 
 import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
 from data_odds import fetch_odds, match_odds_to_game
 from analysis import analyze_game, risk_filter, build_watchlist
-from discord_bot import send_pick, send_update, send_results, export_payload
+from discord_bot import send_pick, send_update, send_results, export_payload, _format_game_time
 from config import DISCORD_WEBHOOK_URL
 
 
@@ -77,6 +79,29 @@ def run_analysis(dry_run: bool = False):
     print("[5/6] Running risk filter...")
     approved = risk_filter(analyses)
 
+    # ── Log all game analyses to DB ──
+    if not dry_run:
+        today = date.today().isoformat()
+        for a in analyses:
+            ou = a.get("ou_pick") or {}
+            db.save_analysis_log({
+                "game_date": today,
+                "mlb_game_id": a["mlb_game_id"],
+                "game": a["game"],
+                "away_team": a["away_team"],
+                "home_team": a["home_team"],
+                "away_pitcher": a.get("away_pitcher", "TBD"),
+                "home_pitcher": a.get("home_pitcher", "TBD"),
+                "composite_score": a["composite_score"],
+                "ml_pick_team": a["ml_pick_team"],
+                "ml_win_probability": a["ml_win_probability"],
+                "ml_confidence": a["ml_confidence"],
+                "ou_pick": ou.get("pick"),
+                "ou_line": ou.get("line"),
+                "ou_confidence": ou.get("confidence"),
+            })
+        print(f"[DB] Logged {len(analyses)} game analyses to analysis_log.")
+
     # ── Print Analysis Board ──
     print("\n" + "=" * 60)
     print("  GAME ANALYSIS BOARD")
@@ -129,7 +154,7 @@ def run_analysis(dry_run: bool = False):
         print("=" * 60)
 
     # ── Save picks and send to Discord ──
-    print(f"\n[6/6] {'DRY RUN — skipping Discord' if dry_run else 'Saving picks and sending to Discord'}...")
+    print(f"\n[6/6] {'DRY RUN — skipping Discord and DB save' if dry_run else 'Saving picks and sending to Discord'}...")
 
     for pick in approved:
         # Upsert game to DB
@@ -138,6 +163,17 @@ def run_analysis(dry_run: bool = False):
             "game_date": date.today().isoformat(),
             "status": "scheduled",
         })
+
+        if dry_run:
+            # Print payload only — no DB write, no Discord
+            print(f"\n  📦 Webhook payload for: {pick['game']}")
+            print(export_payload(pick))
+            continue
+
+        # Skip if a discord-sent pick already exists today for this game + pick type
+        if db.pick_already_sent_today(game_id, pick["pick_type"]):
+            print(f"[DB] Pick already sent today for game_id={game_id} type={pick['pick_type']} — skipping.")
+            continue
 
         # Save pick
         pick_record = {
@@ -159,10 +195,9 @@ def run_analysis(dry_run: bool = False):
         }
         pick_id = db.save_pick(pick_record)
 
-        if not dry_run:
-            sent = send_pick(pick)
-            if sent:
-                db.mark_pick_sent(pick_id)
+        sent = send_pick(pick)
+        if sent:
+            db.mark_pick_sent(pick_id)
 
         # Print webhook payload for reference
         print(f"\n  📦 Webhook payload for: {pick['game']}")
@@ -432,6 +467,149 @@ def run_results():
         print("  📤 Results recap sent to Discord.")
 
 
+def run_game_analysis(query: str):
+    """
+    TARGETED GAME ANALYSIS
+    Run the full 7-agent pipeline on any game(s) matching the query string
+    and send each analysis to Discord. Does not apply confidence thresholds
+    or send approved picks — pure analysis only.
+
+    Query is matched case-insensitively against away_team_name and home_team_name.
+    Multiple space-separated tokens all have to match somewhere in the game.
+    """
+    print("=" * 60)
+    print(f"  MLB GAME ANALYSIS — {date.today().strftime('%B %d, %Y')}")
+    print(f"  Query: \"{query}\"")
+    print("=" * 60)
+
+    db.init_db()
+    fetch_all_teams()
+    games = collect_game_data()
+
+    if not games:
+        print("\n⚠️  No games found for today.")
+        return
+
+    tokens = query.lower().split()
+    matches = []
+    for g in games:
+        game_str = f"{g.get('away_team_name','')} {g.get('home_team_name','')}".lower()
+        if all(t in game_str for t in tokens):
+            matches.append(g)
+
+    if not matches:
+        print(f"\n⚠️  No games found matching \"{query}\".")
+        print("Today's games:")
+        for g in games:
+            print(f"  - {g.get('away_team_name','')} @ {g.get('home_team_name','')}")
+        return
+
+    print(f"\nFound {len(matches)} matching game(s). Running full analysis...\n")
+
+    odds_list = fetch_odds()
+
+    for g in matches:
+        odds_data = match_odds_to_game(odds_list, g["home_team_name"], g["away_team_name"])
+        a = analyze_game(g, odds_data)
+
+        agents = a.get("agents", {})
+        away = a["away_team"]
+        home = a["home_team"]
+
+        def agent_score(key):
+            return f"{agents.get(key, {}).get('score', 0):+.3f}"
+
+        def agent_detail(key):
+            ag = agents.get(key, {})
+            return ag.get("edge", ag.get("detail", {}).get("note", "N/A"))
+
+        # Odds block
+        mkt = agents.get("market", {}).get("detail", {})
+
+        def fmt_ml(v):
+            if v is None: return "N/A"
+            return f"+{int(v)}" if v > 0 else str(int(v))
+
+        def fmt_pt(v):
+            if v is None: return "N/A"
+            return f"{v:+.1f}" if v % 1 != 0 else f"{v:+.0f}"
+
+        odds_lines = []
+        away_ml = mkt.get("away_ml"); home_ml = mkt.get("home_ml")
+        if away_ml and home_ml:
+            odds_lines.append(f"- ML: {away} {fmt_ml(away_ml)} / {home} {fmt_ml(home_ml)}")
+        home_rl = mkt.get("home_rl"); away_rl = mkt.get("away_rl")
+        hrp = mkt.get("home_rl_price"); arp = mkt.get("away_rl_price")
+        if home_rl is not None and hrp and arp:
+            aw_rl = away_rl if away_rl is not None else -home_rl
+            odds_lines.append(
+                f"- RL: {away} {fmt_pt(aw_rl)} ({fmt_ml(arp)}) / "
+                f"{home} {fmt_pt(home_rl)} ({fmt_ml(hrp)})"
+            )
+        total = mkt.get("total_line"); op = mkt.get("over_price"); up_p = mkt.get("under_price")
+        if total:
+            o_str = f" O {fmt_ml(op)}" if op else ""
+            u_str = f" U {fmt_ml(up_p)}" if up_p else ""
+            odds_lines.append(f"- Total: {total}{o_str} /{u_str}")
+        odds_block = "\n".join(odds_lines) if odds_lines else "N/A"
+
+        # O/U signal
+        ou = a.get("ou_pick", {})
+        ou_line = ""
+        if ou.get("pick"):
+            ou_line = (
+                f"\n**O/U Signal:** {ou['pick'].upper()} {ou.get('line','?')} — "
+                f"conf {ou.get('confidence','?')}/10 | {ou.get('edge','')}"
+            )
+
+        # Status label
+        conf = a["ml_confidence"]
+        if conf >= 7:
+            status_line = f"✅ **APPROVED PICK** — {a['ml_pick_team']} ML"
+        elif conf >= 5:
+            status_line = f"👁 **WATCHLIST** — {a['ml_pick_team']} ML (monitor lineups/lines)"
+        else:
+            status_line = f"📊 **ANALYSIS ONLY** — below threshold"
+
+        game_time_str = _format_game_time(a.get("game_time_utc", ""))
+        game_time_line = f"**Date/Time:** {game_time_str}\n" if game_time_str else ""
+
+        msg = (
+            f"⚾ **MLB FULL GAME ANALYSIS — {date.today().strftime('%B %d, %Y')}**\n"
+            f"\n"
+            f"**{a['game']}**\n"
+            f"{game_time_line}"
+            f"**Pitchers:** {a['away_pitcher']} ({away}) vs {a['home_pitcher']} ({home})\n"
+            f"\n"
+            f"{status_line}\n"
+            f"**Confidence:** {conf}/10  |  **Win Prob:** {a['ml_win_probability']}%\n"
+            f"**Composite Score:** {a['composite_score']:+.3f}\n"
+            f"**Projected Score:** {away} {a['projected_away_score']} — {home} {a['projected_home_score']}"
+            f"{ou_line}\n"
+            f"\n"
+            f"**Current Odds:**\n{odds_block}\n"
+            f"\n"
+            f"**Agent Breakdown:**\n"
+            f"- Pitching ({agent_score('pitching')}): {agent_detail('pitching')}\n"
+            f"- Offense ({agent_score('offense')}): {agent_detail('offense')}\n"
+            f"- Advanced/Statcast ({agent_score('advanced')}): {agent_detail('advanced')}\n"
+            f"- Bullpen ({agent_score('bullpen')}): {agent_detail('bullpen')}\n"
+            f"- Momentum ({agent_score('momentum')}): {agent_detail('momentum')}\n"
+            f"- Weather ({agent_score('weather')}): {agent_detail('weather')}\n"
+            f"- Market ({agent_score('market')}): {agent_detail('market')}\n"
+        )
+
+        print(msg)
+
+        resp = requests.post(DISCORD_WEBHOOK_URL, json={"content": msg}, timeout=10)
+        if resp.status_code == 204:
+            print(f"[DISCORD] Sent: {a['game']}")
+        else:
+            print(f"[DISCORD] Failed ({resp.status_code}): {resp.text}")
+
+    print("\n✅ Game analysis complete.")
+
+
 def _print_snapshot():
     """Print tracking snapshot."""
     summary = db.get_roi_summary(30)
@@ -455,6 +633,13 @@ def main():
         _print_snapshot()
     elif "--test" in args:
         run_analysis(dry_run=True)
+    elif "--game" in args:
+        idx = args.index("--game")
+        query = args[idx + 1] if idx + 1 < len(args) else ""
+        if not query:
+            print("Usage: python3 engine.py --game <team name>")
+            sys.exit(1)
+        run_game_analysis(query)
     else:
         run_analysis(dry_run=False)
 
