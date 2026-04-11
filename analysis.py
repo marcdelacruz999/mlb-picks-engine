@@ -512,6 +512,30 @@ def score_momentum(game: dict) -> dict:
         else:
             signals.append(f"Away has significantly better record ({away_wpct:.3f} vs {home_wpct:.3f})")
 
+    # Travel fatigue penalty (away team only)
+    away_travel = game.get("away_travel", {})
+    if away_travel:
+        road_games = away_travel.get("consecutive_road_games", 0)
+        tz_changes = away_travel.get("timezone_changes_last_5d", 0)
+
+        travel_penalty = 0.0
+        travel_notes = []
+
+        if road_games >= 5:
+            travel_penalty += 0.04
+            travel_notes.append(f"Away on extended road trip ({road_games} games)")
+
+        if tz_changes >= 2:
+            travel_penalty += 0.05
+            travel_notes.append(f"Away crossed timezones {tz_changes}x in last 5 days")
+
+        # Cap combined penalty
+        travel_penalty = min(travel_penalty, 0.08)
+
+        if travel_penalty > 0:
+            score += travel_penalty  # positive = home advantage (away penalized)
+            signals.extend(travel_notes)
+
     score = _clamp(score)
     edge = "; ".join(signals) if signals else "No significant momentum edge"
 

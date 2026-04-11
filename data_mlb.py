@@ -575,6 +575,105 @@ def fetch_team_record(team_mlb_id: int, season: int = None) -> dict:
 
 
 # ──────────────────────────────────────────────
+# MLB Stats API — Travel Fatigue Context
+# ──────────────────────────────────────────────
+
+# Timezone mapping by team abbreviation (home venue timezone)
+_TEAM_TIMEZONE = {}
+for _abbr in ("BOS", "NYY", "NYM", "PHI", "BAL", "WSH", "PIT", "CLE", "DET", "TOR", "CIN", "ATL", "MIA", "TB", "MIL"):
+    _TEAM_TIMEZONE[_abbr] = "ET"
+for _abbr in ("CHC", "CWS", "STL", "MIN", "HOU", "KC", "TEX"):
+    _TEAM_TIMEZONE[_abbr] = "CT"
+for _abbr in ("ARI", "COL"):
+    _TEAM_TIMEZONE[_abbr] = "MT"
+for _abbr in ("LAD", "SF", "OAK", "SD", "SEA", "LAA"):
+    _TEAM_TIMEZONE[_abbr] = "PT"
+
+
+def fetch_travel_context(team_id: int, game_date: str) -> dict:
+    """
+    Fetch recent schedule context to assess travel fatigue.
+    Returns consecutive_road_games, timezone_changes_last_5d, days_since_off_day.
+    Returns {} on error.
+    """
+    try:
+        start_date = (date.fromisoformat(game_date) - timedelta(days=7)).isoformat()
+        url = (
+            f"{MLB_BASE}/schedule?teamId={team_id}"
+            f"&startDate={start_date}&endDate={game_date}&sportId=1"
+        )
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # Collect games in chronological order
+        games_list = []
+        for d in data.get("dates", []):
+            d_date = d.get("date", "")
+            for g in d.get("games", []):
+                status = g.get("status", {}).get("detailedState", "")
+                # Include scheduled/in-progress today and final past games
+                teams = g.get("teams", {})
+                away_team = teams.get("away", {}).get("team", {})
+                home_team = teams.get("home", {}).get("team", {})
+                # Determine if this team is home or away
+                is_away = away_team.get("id") == team_id
+                is_home = home_team.get("id") == team_id
+                if not (is_away or is_home):
+                    continue
+                # Home venue team abbreviation for timezone lookup
+                home_abbr = home_team.get("abbreviation", "")
+                games_list.append({
+                    "date": d_date,
+                    "is_away": is_away,
+                    "home_abbr": home_abbr,
+                })
+
+        # Sort by date
+        games_list.sort(key=lambda x: x["date"])
+
+        if not games_list:
+            return {}
+
+        # Today's game timezone
+        today_game = games_list[-1]
+        today_tz = _TEAM_TIMEZONE.get(today_game["home_abbr"], "ET")
+
+        # consecutive_road_games: count backwards from today's game
+        consecutive_road_games = 0
+        for g in reversed(games_list):
+            if g["is_away"]:
+                consecutive_road_games += 1
+            else:
+                break
+
+        # timezone_changes_last_5d: last 5 games with a different TZ than today
+        last_5 = games_list[-5:]
+        tz_changes = sum(
+            1 for g in last_5
+            if _TEAM_TIMEZONE.get(g["home_abbr"], "ET") != today_tz
+        )
+
+        # days_since_off_day: consecutive days with a game ending at today
+        all_dates = sorted({g["date"] for g in games_list})
+        days_since_off_day = 0
+        today_dt = date.fromisoformat(game_date)
+        check_dt = today_dt
+        while check_dt.isoformat() in all_dates:
+            days_since_off_day += 1
+            check_dt -= timedelta(days=1)
+
+        return {
+            "consecutive_road_games": consecutive_road_games,
+            "timezone_changes_last_5d": tz_changes,
+            "days_since_off_day": days_since_off_day,
+        }
+    except Exception as e:
+        print(f"[DATA] Error fetching travel context for team {team_id}: {e}")
+        return {}
+
+
+# ──────────────────────────────────────────────
 # FanGraphs Scraping — Advanced Metrics
 # ──────────────────────────────────────────────
 
@@ -728,6 +827,10 @@ def collect_game_data(target_date: str = None) -> list:
         # Fetch records / momentum
         g["away_record"] = fetch_team_record(g["away_team_mlb_id"])
         g["home_record"] = fetch_team_record(g["home_team_mlb_id"])
+
+        # Fetch travel context (fatigue signal)
+        g["away_travel"] = fetch_travel_context(g["away_team_mlb_id"], target_date)
+        g["home_travel"] = fetch_travel_context(g["home_team_mlb_id"], target_date)
 
         # Fetch weather
         g["weather"] = fetch_venue_weather(g.get("venue_id"), target_date, g.get("game_time_utc", ""))
