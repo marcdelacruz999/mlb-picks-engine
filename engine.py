@@ -255,6 +255,7 @@ def run_refresh():
 
     approved = risk_filter(analyses)
     approved_ids = {p["mlb_game_id"] for p in approved}
+    approved_by_type = {(p["mlb_game_id"], p["pick_type"]) for p in approved}
 
     # ── Update analysis_log with latest analysis (lineups may now be confirmed) ──
     today = date.today().isoformat()
@@ -302,8 +303,13 @@ def run_refresh():
             continue
 
         prior_conf = conn_pick.get("confidence", 0)
-        new_conf = refreshed["ml_confidence"]
-        still_approved = mlb_game_id in approved_ids
+        pick_type = conn_pick.get("pick_type", "moneyline")
+        if pick_type in ("over", "under"):
+            ou = refreshed.get("ou_pick") or {}
+            new_conf = ou.get("confidence") or refreshed["ml_confidence"]
+        else:
+            new_conf = refreshed["ml_confidence"]
+        still_approved = (mlb_game_id, pick_type) in approved_by_type
 
         if not still_approved:
             # Pick no longer meets threshold — cancel alert
