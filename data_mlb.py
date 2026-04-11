@@ -121,6 +121,84 @@ def fetch_todays_games(target_date: str = None) -> list:
 
 
 # ──────────────────────────────────────────────
+# MLB Stats API — Season Schedule (Backtesting)
+# ──────────────────────────────────────────────
+
+# Season date ranges for regular season data
+_SEASON_DATES = {
+    2024: ("2024-03-20", "2024-10-01"),
+    2025: ("2025-03-27", "2025-09-28"),
+}
+
+
+def fetch_season_schedule(season: int) -> list:
+    """
+    Fetch all completed regular season games for a given year.
+    Returns only Final games with both scores present.
+    Used for backtesting only — not part of the daily pipeline.
+    """
+    if season not in _SEASON_DATES:
+        raise ValueError(f"Season {season} not supported. Add date range to _SEASON_DATES.")
+
+    start_date, end_date = _SEASON_DATES[season]
+    url = (
+        f"{MLB_BASE}/schedule?sportId=1&gameType=R"
+        f"&startDate={start_date}&endDate={end_date}"
+        f"&hydrate=probablePitcher,team,linescore,venue"
+        f"&limit=10000"
+    )
+
+    try:
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"[BACKTEST] Error fetching {season} schedule: {e}")
+        return []
+
+    games = []
+    for d in data.get("dates", []):
+        for g in d.get("games", []):
+            status = g.get("status", {}).get("detailedState", "")
+            if "Final" not in status:
+                continue
+
+            away = g.get("teams", {}).get("away", {})
+            home = g.get("teams", {}).get("home", {})
+
+            away_score = away.get("score")
+            home_score = home.get("score")
+
+            if away_score is None or home_score is None:
+                continue
+
+            game_info = {
+                "mlb_game_id": g["gamePk"],
+                "season": season,
+                "game_date": d.get("date", ""),
+                "away_team_id": away.get("team", {}).get("id"),
+                "away_team_name": away.get("team", {}).get("name", ""),
+                "away_team_abbr": away.get("team", {}).get("abbreviation", ""),
+                "home_team_id": home.get("team", {}).get("id"),
+                "home_team_name": home.get("team", {}).get("name", ""),
+                "home_team_abbr": home.get("team", {}).get("abbreviation", ""),
+                "away_score": int(away_score),
+                "home_score": int(home_score),
+                "home_team_won": int(home_score) > int(away_score),
+                "away_pitcher_id": away.get("probablePitcher", {}).get("id"),
+                "away_pitcher_name": away.get("probablePitcher", {}).get("fullName", "TBD"),
+                "home_pitcher_id": home.get("probablePitcher", {}).get("id"),
+                "home_pitcher_name": home.get("probablePitcher", {}).get("fullName", "TBD"),
+                "venue_id": g.get("venue", {}).get("id"),
+                "venue_name": g.get("venue", {}).get("name", ""),
+            }
+            games.append(game_info)
+
+    print(f"[BACKTEST] Fetched {len(games)} completed games for {season} season.")
+    return games
+
+
+# ──────────────────────────────────────────────
 # MLB Stats API — Pitcher Season Stats
 # ──────────────────────────────────────────────
 

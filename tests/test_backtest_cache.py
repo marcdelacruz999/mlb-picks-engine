@@ -62,3 +62,50 @@ def test_fetch_statcast_team_batting_uses_season_cache_key():
 
     # Clean up
     data_mlb._statcast_cache.clear()
+
+
+def test_fetch_season_schedule_returns_completed_games():
+    """fetch_season_schedule should return games with final scores only."""
+    import data_mlb
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json.return_value = {
+        "dates": [
+            {
+                "date": "2024-04-01",
+                "games": [
+                    {
+                        "gamePk": 1001,
+                        "status": {"detailedState": "Final"},
+                        "teams": {
+                            "away": {"team": {"id": 147, "name": "NY Yankees", "abbreviation": "NYY"}, "score": 3, "probablePitcher": {"id": 5001, "fullName": "Gerrit Cole"}},
+                            "home": {"team": {"id": 111, "name": "Boston Red Sox", "abbreviation": "BOS"}, "score": 5, "probablePitcher": {"id": 5002, "fullName": "Nick Pivetta"}},
+                        },
+                        "venue": {"id": 3, "name": "Fenway Park"},
+                    },
+                    {
+                        "gamePk": 1002,
+                        "status": {"detailedState": "Postponed"},
+                        "teams": {
+                            "away": {"team": {"id": 147, "name": "NY Yankees", "abbreviation": "NYY"}, "score": None, "probablePitcher": {}},
+                            "home": {"team": {"id": 111, "name": "Boston Red Sox", "abbreviation": "BOS"}, "score": None, "probablePitcher": {}},
+                        },
+                        "venue": {"id": 3, "name": "Fenway Park"},
+                    },
+                ]
+            }
+        ]
+    }
+
+    with patch('requests.get', return_value=mock_resp):
+        games = data_mlb.fetch_season_schedule(2024)
+
+    # Postponed game should be excluded
+    assert len(games) == 1
+    g = games[0]
+    assert g["mlb_game_id"] == 1001
+    assert g["away_score"] == 3
+    assert g["home_score"] == 5
+    assert g["home_team_won"] is True
+    assert g["away_pitcher_id"] == 5001
+    assert g["season"] == 2024
