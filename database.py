@@ -204,6 +204,16 @@ def init_db():
         UNIQUE(game_date, mlb_game_id)
     );
 
+    CREATE TABLE IF NOT EXISTS scratch_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_date TEXT,
+        mlb_game_id INTEGER,
+        old_pitcher TEXT,
+        new_pitcher TEXT,
+        alerted_at TEXT,
+        UNIQUE(game_date, mlb_game_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
     CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
@@ -524,6 +534,44 @@ def get_model_accuracy_summary(days: int = 30) -> dict:
         "ou_total": ou_total,
         "ou_accuracy": round(ou_correct / ou_total * 100, 1) if ou_total else 0.0,
     }
+
+
+# ── Scratch Alerts ───────────────────────────────────────
+
+def pitcher_already_alerted(mlb_game_id: int, game_date: str) -> bool:
+    """Return True if a scratch alert has already been sent for this game today."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM scratch_alerts WHERE mlb_game_id=? AND game_date=?",
+        (mlb_game_id, game_date)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def save_scratch_alert(mlb_game_id: int, game_date: str, old_pitcher: str, new_pitcher: str):
+    """Insert a scratch alert record (one per game per day via UNIQUE constraint)."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    try:
+        conn.execute(
+            """INSERT OR IGNORE INTO scratch_alerts
+               (game_date, mlb_game_id, old_pitcher, new_pitcher, alerted_at)
+               VALUES (?,?,?,?,?)""",
+            (game_date, mlb_game_id, old_pitcher, new_pitcher, now)
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"[DB] Error saving scratch alert: {e}")
+    finally:
+        conn.close()
+
+
+# ── Alias for backward compatibility ─────────────────────
+
+def get_db_connection():
+    """Alias for get_connection() — used by monitor.py."""
+    return get_connection()
 
 
 if __name__ == "__main__":
