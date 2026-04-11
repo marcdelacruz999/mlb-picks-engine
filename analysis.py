@@ -793,6 +793,7 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
         "home_pitcher": game.get("home_pitcher_name", "TBD"),
         "mlb_game_id": game.get("mlb_game_id"),
         "game_time_utc": game.get("game_time_utc", ""),
+        "status": game.get("status", "Scheduled"),
         "lineup_status": lineup_status,
         "lineups_confirmed": lineups_confirmed,
 

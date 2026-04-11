@@ -305,6 +305,13 @@ def run_refresh():
         if not refreshed:
             continue
 
+        # Skip games that have already started — no actionable update possible
+        game_status = refreshed.get("status", "Scheduled")
+        pre_game_statuses = {"Scheduled", "Pre-Game", "Warmup", "Delayed Start"}
+        if game_status not in pre_game_statuses:
+            print(f"  ⏭️  {refreshed['game']} — skipping ({game_status})")
+            continue
+
         prior_conf = conn_pick.get("confidence", 0)
         pick_type = conn_pick.get("pick_type", "moneyline")
         if pick_type in ("over", "under"):
