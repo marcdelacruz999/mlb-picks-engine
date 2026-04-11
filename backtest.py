@@ -450,3 +450,67 @@ def print_reports(results: list):
         print(f'      "{agent}": {w},')
     print("  }")
     print("=" * 60)
+
+
+# ══════════════════════════════════════════════
+#  CLI ENTRY POINT
+# ══════════════════════════════════════════════
+
+def run_backtest(seasons: list, force: bool = False) -> list:
+    """Run full backtest for the given seasons. Returns all scored results."""
+    cache = BacktestCache()
+    all_results = []
+
+    for season in seasons:
+        print(f"\n[BACKTEST] ── Season {season} ─────────────────────────")
+        games = load_season_games(season, cache=cache, force=force)
+        if not games:
+            print(f"[BACKTEST] No games found for {season}. Skipping.")
+            continue
+
+        results = score_historical_games(games, cache=cache)
+        all_results.extend(results)
+        print(f"[BACKTEST] Season {season}: {len(results)} games scored.")
+
+    cache.close()
+    return all_results
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="MLB Picks Engine — Historical Backtester"
+    )
+    parser.add_argument(
+        "--season",
+        type=str,
+        default=None,
+        help="Season(s) to backtest, comma-separated (e.g. 2024 or 2024,2025). Default: 2024,2025"
+    )
+    parser.add_argument(
+        "--suggest-weights",
+        action="store_true",
+        help="Output suggested WEIGHTS dict based on backtest results"
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Force re-fetch all data, ignoring cached values"
+    )
+    args = parser.parse_args()
+
+    if args.season:
+        seasons = [int(s.strip()) for s in args.season.split(",")]
+    else:
+        seasons = DEFAULT_SEASONS
+
+    results = run_backtest(seasons, force=args.no_cache)
+
+    if not results:
+        print("[BACKTEST] No results to report.")
+        return
+
+    print_reports(results)
+
+
+if __name__ == "__main__":
+    main()
