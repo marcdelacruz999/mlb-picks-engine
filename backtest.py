@@ -172,3 +172,76 @@ def build_game_dict(game_row: dict, cache: BacktestCache) -> dict:
         "home_lineup_confirmed": False,
         "away_lineup_confirmed": False,
     }
+
+
+# ══════════════════════════════════════════════
+#  PHASE 2 — SCORING
+# ══════════════════════════════════════════════
+
+def score_historical_games(game_rows: list, cache: BacktestCache) -> list:
+    """
+    Score each historical game using the existing analysis.py agents.
+    Returns a list of result dicts — one per scoreable game.
+
+    Skips games where both pitchers are unknown (no meaningful pitching score).
+    Market agent is excluded (no historical odds data) — scored neutral.
+    """
+    results = []
+    total = len(game_rows)
+
+    for i, game_row in enumerate(game_rows):
+        away_pid = game_row.get("away_pitcher_id")
+        home_pid = game_row.get("home_pitcher_id")
+
+        # Skip games with no pitcher data at all
+        if not away_pid and not home_pid:
+            continue
+
+        game_dict = build_game_dict(game_row, cache)
+
+        try:
+            # Run analysis with no odds data (market agent scores 0.0)
+            analysis = analyze_game(game_dict, odds_data=None)
+        except Exception as e:
+            print(f"[BACKTEST] Error scoring game {game_row['mlb_game_id']}: {e}")
+            continue
+
+        # Extract per-agent scores (excluding market — not backtestable)
+        agent_scores = {
+            agent: analysis["agents"][agent]["score"]
+            for agent in ["pitching", "offense", "bullpen", "advanced", "momentum", "weather"]
+        }
+
+        result = {
+            "mlb_game_id": game_row["mlb_game_id"],
+            "season": game_row["season"],
+            "game_date": game_row["game_date"],
+            "away_team": game_row["away_team_name"],
+            "home_team": game_row["home_team_name"],
+            "away_team_abbr": game_row["away_team_abbr"],
+            "home_team_abbr": game_row["home_team_abbr"],
+            "away_score": game_row["away_score"],
+            "home_score": game_row["home_score"],
+            "home_team_won": game_row["home_team_won"],
+
+            # Model output
+            "model_pick_side": analysis["ml_pick_side"],
+            "model_correct": (
+                (analysis["ml_pick_side"] == "home" and game_row["home_team_won"]) or
+                (analysis["ml_pick_side"] == "away" and not game_row["home_team_won"])
+            ),
+            "ml_confidence": analysis["ml_confidence"],
+            "ml_edge_score": analysis["ml_edge_score"],
+            "ml_win_probability": analysis["ml_win_probability"],
+            "composite_score": analysis["composite_score"],
+
+            # Per-agent scores for correlation analysis
+            "agent_scores": agent_scores,
+        }
+        results.append(result)
+
+        if (i + 1) % 200 == 0:
+            print(f"[BACKTEST] Scored {i + 1}/{total} games...")
+
+    print(f"[BACKTEST] Scored {len(results)} games (skipped {total - len(results)} missing pitchers).")
+    return results
