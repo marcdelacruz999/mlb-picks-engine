@@ -179,6 +179,7 @@ mlb-picks-engine/
 ├── backtest_cache.db       — Auto-created backtest cache
 ├── engine.log              — All run output
 ├── COMPLETED_IMPROVEMENTS.md — Tracks every optimizer-implemented improvement
+├── PIPELINE.md             — Full pipeline framework overview (architecture, agents, flow, weights)
 ├── SETUP.md                — First-time setup instructions
 ├── INSIGHTS.md             — Daily outcomes, calibration tracker, bias log, weight tuning history
 └── CLAUDE.md               — This file
