@@ -178,6 +178,22 @@ def score_offense(game: dict) -> dict:
     }
 
 
+def _bullpen_fatigue_penalty(usage: dict) -> float:
+    """
+    Returns a positive penalty magnitude based on bullpen innings in the last 3 days.
+    Callers apply this as: score += away_penalty - home_penalty.
+      ≤ 8.0 IP → 0.00 (fresh)
+      8–12 IP  → 0.08 (moderate fatigue)
+      > 12 IP  → 0.15 (heavy fatigue)
+    """
+    ip3 = usage.get("ip_last_3", 0.0)
+    if ip3 > 12.0:
+        return 0.15
+    elif ip3 > 8.0:
+        return 0.08
+    return 0.0
+
+
 def score_bullpen(game: dict) -> dict:
     """
     BULLPEN AGENT — Compare team bullpen strength with fatigue adjustment.
@@ -217,16 +233,8 @@ def score_bullpen(game: dict) -> dict:
     home_usage = game.get("home_bullpen_usage", {})
     away_usage = game.get("away_bullpen_usage", {})
 
-    def _fatigue_penalty(usage: dict) -> float:
-        ip3 = usage.get("ip_last_3", 0.0) if usage else 0.0
-        if ip3 > 12.0:
-            return 0.15
-        elif ip3 > 8.0:
-            return 0.08
-        return 0.0
-
-    home_penalty = _fatigue_penalty(home_usage)
-    away_penalty = _fatigue_penalty(away_usage)
+    home_penalty = _bullpen_fatigue_penalty(home_usage)
+    away_penalty = _bullpen_fatigue_penalty(away_usage)
     score += away_penalty - home_penalty
 
     score = _clamp(score)

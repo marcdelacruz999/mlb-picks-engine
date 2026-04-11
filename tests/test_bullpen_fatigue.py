@@ -269,3 +269,15 @@ def test_score_bullpen_fatigue_detail_included():
     assert "away_bp_ip_last_3" in result["detail"]
     assert result["detail"]["home_bp_ip_last_3"] == 13.0
     assert result["detail"]["away_bp_ip_last_3"] == 2.0
+
+
+def test_bullpen_fatigue_penalty_thresholds():
+    """Verify exact threshold behavior at boundaries."""
+    import analysis
+    assert analysis._bullpen_fatigue_penalty({}) == 0.0
+    assert analysis._bullpen_fatigue_penalty({"ip_last_3": 0.0}) == 0.0
+    assert analysis._bullpen_fatigue_penalty({"ip_last_3": 8.0}) == 0.0   # boundary: 8.0 is fresh
+    assert analysis._bullpen_fatigue_penalty({"ip_last_3": 8.1}) == 0.08  # just over moderate threshold
+    assert analysis._bullpen_fatigue_penalty({"ip_last_3": 12.0}) == 0.08 # boundary: 12.0 is moderate
+    assert analysis._bullpen_fatigue_penalty({"ip_last_3": 12.1}) == 0.15 # just over heavy threshold
+    assert analysis._bullpen_fatigue_penalty({"ip_last_3": 20.0}) == 0.15 # heavy
