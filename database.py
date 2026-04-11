@@ -479,6 +479,43 @@ def get_roi_summary(days: int = 30) -> dict:
     return summary
 
 
+def get_model_accuracy_summary(days: int = 30) -> dict:
+    """Model accuracy across all logged games (not just sent picks) over last N days."""
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT ml_status, ou_status, COUNT(*) as cnt
+        FROM analysis_log
+        WHERE game_date >= date('now', ?)
+        AND ml_status IN ('correct','incorrect','push')
+        GROUP BY ml_status, ou_status
+    """, (f"-{days} days",)).fetchall()
+    conn.close()
+
+    ml_correct = ml_incorrect = ou_correct = ou_incorrect = 0
+    for r in rows:
+        if r["ml_status"] == "correct":
+            ml_correct += r["cnt"]
+        elif r["ml_status"] == "incorrect":
+            ml_incorrect += r["cnt"]
+        if r["ou_status"] == "correct":
+            ou_correct += r["cnt"]
+        elif r["ou_status"] == "incorrect":
+            ou_incorrect += r["cnt"]
+
+    ml_total = ml_correct + ml_incorrect
+    ou_total = ou_correct + ou_incorrect
+    return {
+        "ml_correct": ml_correct,
+        "ml_incorrect": ml_incorrect,
+        "ml_total": ml_total,
+        "ml_accuracy": round(ml_correct / ml_total * 100, 1) if ml_total else 0.0,
+        "ou_correct": ou_correct,
+        "ou_incorrect": ou_incorrect,
+        "ou_total": ou_total,
+        "ou_accuracy": round(ou_correct / ou_total * 100, 1) if ou_total else 0.0,
+    }
+
+
 if __name__ == "__main__":
     init_db()
     print("[DB] Tables created / verified.")

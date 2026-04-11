@@ -668,14 +668,19 @@ def run_game_analysis(query: str):
 
 
 def _print_snapshot():
-    """Print tracking snapshot."""
-    summary = db.get_roi_summary(30)
+    """Print pick accuracy + model accuracy tracking snapshot."""
+    pick_summary = db.get_roi_summary(30)
+    model_summary = db.get_model_accuracy_summary(30)
+
     print("\n" + "-" * 40)
     print("  TRACKING SNAPSHOT (Last 30 Days)")
     print("-" * 40)
-    print(f"  Record: {summary['won']}W - {summary['lost']}L - {summary['push']}P")
-    print(f"  Win Rate: {summary['win_rate']}%")
-    print(f"  Total Graded: {summary['total']}")
+    print(f"  PICKS SENT:  {pick_summary['won']}W - {pick_summary['lost']}L - {pick_summary['push']}P  "
+          f"({pick_summary['win_rate']}% win rate)  [{pick_summary['total']} graded]")
+    print(f"  MODEL ML:    {model_summary['ml_correct']}W - {model_summary['ml_incorrect']}L  "
+          f"({model_summary['ml_accuracy']}% accuracy)  [{model_summary['ml_total']} games]")
+    print(f"  MODEL O/U:   {model_summary['ou_correct']}W - {model_summary['ou_incorrect']}L  "
+          f"({model_summary['ou_accuracy']}% accuracy)  [{model_summary['ou_total']} games]")
 
 
 def main():

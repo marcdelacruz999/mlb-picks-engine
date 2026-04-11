@@ -135,3 +135,39 @@ def test_run_results_grades_analysis_log(tmp_db, monkeypatch):
     assert row["ml_status"] == "correct"
     assert row["ou_status"] == "push"
     assert row["actual_total"] == 8
+
+
+def test_get_model_accuracy_summary(tmp_db):
+    from datetime import date as dt
+    today = dt.today().isoformat()
+
+    for i, (ml_s, ou_s) in enumerate([
+        ("correct", "correct"),
+        ("correct", "incorrect"),
+        ("incorrect", "none"),
+        ("correct", "correct"),
+    ]):
+        log_id = db.save_analysis_log({
+            "game_date": today,
+            "mlb_game_id": 88000 + i,
+            "game": f"A{i} @ B{i}",
+            "away_team": f"A{i}", "home_team": f"B{i}",
+            "away_pitcher": "P", "home_pitcher": "P",
+            "composite_score": 0.1,
+            "ml_pick_team": f"B{i}",
+            "ml_win_probability": 55.0,
+            "ml_confidence": 5,
+            "ou_pick": "over" if ou_s != "none" else None,
+            "ou_line": 8.0 if ou_s != "none" else None,
+            "ou_confidence": 6 if ou_s != "none" else None,
+        })
+        db.update_analysis_log_result(log_id, ml_status=ml_s, ou_status=ou_s,
+                                       actual_away=3, actual_home=5, actual_total=8)
+
+    summary = db.get_model_accuracy_summary(30)
+    assert summary["ml_correct"] == 3
+    assert summary["ml_incorrect"] == 1
+    assert summary["ml_total"] == 4
+    assert summary["ml_accuracy"] == 75.0
+    assert summary["ou_correct"] == 2
+    assert summary["ou_incorrect"] == 1
