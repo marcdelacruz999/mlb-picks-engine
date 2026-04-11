@@ -193,6 +193,8 @@ def run_analysis(dry_run: bool = False):
             "edge_market": pick["edge_market"],
             "notes": pick.get("notes", ""),
             "ev_score": pick.get("ev_score"),
+            "ml_odds": pick.get("ml_odds"),
+            "ou_odds": pick.get("ou_odds"),
         }
         pick_id = db.save_pick(pick_record)
 
@@ -710,8 +712,10 @@ def _print_snapshot():
     print("\n" + "-" * 40)
     print("  TRACKING SNAPSHOT (Last 30 Days)")
     print("-" * 40)
+    roi = pick_summary.get("roi_per_unit")
+    roi_str = f"  {roi:+.3f} units" if roi is not None else ""
     print(f"  PICKS SENT:  {pick_summary['won']}W - {pick_summary['lost']}L - {pick_summary['push']}P  "
-          f"({pick_summary['win_rate']}% win rate)  [{pick_summary['total']} graded]")
+          f"({pick_summary['win_rate']}% win rate){roi_str}  [{pick_summary['total']} graded]")
     print(f"  MODEL ML:    {model_summary['ml_correct']}W - {model_summary['ml_incorrect']}L  "
           f"({model_summary['ml_accuracy']}% accuracy)  [{model_summary['ml_total']} games]")
     print(f"  MODEL O/U:   {model_summary['ou_correct']}W - {model_summary['ou_incorrect']}L  "

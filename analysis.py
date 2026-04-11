@@ -1015,6 +1015,7 @@ def risk_filter(analyses: list) -> list:
                     "mlb_game_id": a["mlb_game_id"],
                     "game_time_utc": a.get("game_time_utc", ""),
                     "analysis": a,
+                    "ml_odds": pick_ml_odds,
                     "ev_score": ev,
                 }
                 approved.append(pick_dict)
@@ -1053,6 +1054,7 @@ def risk_filter(analyses: list) -> list:
                     "mlb_game_id": a["mlb_game_id"],
                     "game_time_utc": a.get("game_time_utc", ""),
                     "analysis": a,
+                    "ou_odds": ou_odds,
                     "ev_score": ev_ou,
                 }
                 approved.append(ou_dict)

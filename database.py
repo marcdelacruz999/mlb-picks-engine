@@ -158,6 +158,8 @@ def init_db():
         edge_market TEXT,
         notes TEXT,
         ev_score REAL,
+        ml_odds INTEGER,
+        ou_odds INTEGER,
         status TEXT DEFAULT 'pending' CHECK(status IN ('pending','won','lost','push','cancelled')),
         discord_sent INTEGER DEFAULT 0,
         created_at TEXT,
@@ -231,6 +233,18 @@ def init_db():
     except sqlite3.OperationalError:
         pass  # column already exists
 
+    try:
+        conn.execute("ALTER TABLE picks ADD COLUMN ml_odds INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE picks ADD COLUMN ou_odds INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
+
     conn.close()
     print("[DB] Database initialized.")
 
@@ -246,8 +260,8 @@ def save_pick(pick: dict) -> int:
         (game_id, pick_type, pick_team, confidence, win_probability,
          edge_score, projected_away_score, projected_home_score,
          edge_pitching, edge_offense, edge_advanced, edge_bullpen, edge_weather, edge_market,
-         notes, ev_score, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         notes, ev_score, ml_odds, ou_odds, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         pick["game_id"], pick["pick_type"], pick.get("pick_team"),
         pick["confidence"], pick["win_probability"],
@@ -257,6 +271,7 @@ def save_pick(pick: dict) -> int:
         pick.get("edge_advanced"), pick.get("edge_bullpen"), pick.get("edge_weather"),
         pick.get("edge_market"), pick.get("notes"),
         pick.get("ev_score"),
+        pick.get("ml_odds"), pick.get("ou_odds"),
         now, now
     ))
     conn.commit()
@@ -483,20 +498,35 @@ def get_roi_summary(days: int = 30) -> dict:
     """Calculate ROI summary over the last N days."""
     conn = get_connection()
     rows = conn.execute("""
-        SELECT status, COUNT(*) as cnt FROM picks
+        SELECT status, ml_odds, ou_odds FROM picks
         WHERE created_at >= date('now', ?)
         AND status IN ('won','lost','push')
-        GROUP BY status
+        AND discord_sent = 1
     """, (f"-{days} days",)).fetchall()
     conn.close()
 
     summary = {"won": 0, "lost": 0, "push": 0}
+    total_profit = 0.0
+    picks_with_odds = 0
+
     for r in rows:
-        summary[r["status"]] = r["cnt"]
+        summary[r["status"]] = summary.get(r["status"], 0) + 1
+        odds = r["ml_odds"] or r["ou_odds"]
+        if odds is None:
+            continue
+        picks_with_odds += 1
+        if r["status"] == "won":
+            payout = 100.0 / abs(odds) if odds < 0 else odds / 100.0
+            total_profit += payout
+        elif r["status"] == "lost":
+            total_profit -= 1.0
+        # push: 0 profit
 
     total = summary["won"] + summary["lost"]
     summary["total"] = total
     summary["win_rate"] = round(summary["won"] / total * 100, 1) if total > 0 else 0.0
+    summary["roi_per_unit"] = round(total_profit / picks_with_odds, 3) if picks_with_odds > 0 else None
+    summary["units_profit"] = round(total_profit, 3)
     return summary
 
 
