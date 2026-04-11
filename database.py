@@ -177,6 +177,33 @@ def init_db():
         created_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS analysis_log (
+        id INTEGER PRIMARY KEY,
+        game_date TEXT,
+        mlb_game_id INTEGER,
+        game TEXT,
+        away_team TEXT,
+        home_team TEXT,
+        away_pitcher TEXT,
+        home_pitcher TEXT,
+        composite_score REAL,
+        ml_pick_team TEXT,
+        ml_win_probability REAL,
+        ml_confidence INTEGER,
+        ml_status TEXT DEFAULT 'pending' CHECK(ml_status IN ('pending','correct','incorrect','push')),
+        ou_pick TEXT,
+        ou_line REAL,
+        ou_confidence INTEGER,
+        ou_status TEXT DEFAULT 'pending' CHECK(ou_status IN ('pending','correct','incorrect','push','none')),
+        actual_away_score INTEGER,
+        actual_home_score INTEGER,
+        actual_total INTEGER,
+        created_at TEXT,
+        updated_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
+    CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
     CREATE INDEX IF NOT EXISTS idx_picks_date ON picks(created_at);
     CREATE INDEX IF NOT EXISTS idx_picks_status ON picks(status);
@@ -216,12 +243,24 @@ def save_pick(pick: dict) -> int:
     return pick_id
 
 
+def pick_already_sent_today(game_id: int, pick_type: str) -> bool:
+    """Return True if a discord-sent pick already exists today for this game + pick type."""
+    conn = get_connection()
+    today = date.today().isoformat()
+    row = conn.execute(
+        "SELECT id FROM picks WHERE game_id=? AND pick_type=? AND discord_sent=1 AND created_at LIKE ?",
+        (game_id, pick_type, f"{today}%")
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
 def get_today_picks() -> list:
-    """Return all picks created today."""
+    """Return all discord-sent picks created today."""
     conn = get_connection()
     today = date.today().isoformat()
     rows = conn.execute(
-        "SELECT * FROM picks WHERE created_at LIKE ? ORDER BY confidence DESC",
+        "SELECT * FROM picks WHERE created_at LIKE ? AND discord_sent=1 ORDER BY confidence DESC",
         (f"{today}%",)
     ).fetchall()
     conn.close()
