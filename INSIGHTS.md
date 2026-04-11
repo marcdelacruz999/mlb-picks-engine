@@ -150,7 +150,8 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 
 - Scheduler migrated from cron to launchd on 2026-04-11 (macOS TCC blocked cron from accessing ~/Projects/)
 - Project moved from ~/Documents/Claude/ to ~/Projects/Claude/ to avoid TCC-protected Documents folder
-- Plists: ~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist | Wrapper: run.sh
+- Plists: ~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist | Wrappers: run.sh, monitor.sh, run_optimizer.sh
+- monitor.plist uses StartInterval=1800 (every 30 min); no-ops immediately when no pending picks
 
 ## Bug Log
 
@@ -220,7 +221,7 @@ Items marked 🔲 are not yet scheduled.
 | # | Improvement | Status | Notes |
 |---|-------------|--------|-------|
 | 1 | **Expected Value (EV) gate** | ✅ Done 2026-04-11 | MIN_EV=-0.02 in config.py; O/U uses confidence-based win prob |
-| 2 | **Pitcher scratch / lineup change detection** | ✅ Done 2026-04-11 | monitor.py; needs launchd plist still |
+| 2 | **Pitcher scratch / lineup change detection** | ✅ Done 2026-04-11 | monitor.py; launchd plist active (every 30 min) |
 | 3 | **Lineup strength scoring** | ✅ Done 2026-04-11 | Batch MLB people API; session cache |
 
 ### Tier 2 — Solid signal improvements

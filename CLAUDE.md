@@ -18,6 +18,7 @@ A fully automated MLB betting picks engine. It collects live game data, runs a 7
 | 3:00 PM | `engine.py --refresh` | Same |
 | 5:00 PM | `engine.py --refresh` | Same |
 | 11:00 PM | `engine.py --results` | Grades picks vs final scores, sends recap to Discord |
+| Every 30 min | `monitor.py` | Pitcher scratch monitor — checks active picks for SP changes, sends Discord alert |
 | Sunday 9pm | `optimizer.py` | Weekly autonomous improvement — analyzes performance, implements one change, sends Discord report |
 
 Plists at `~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist`. Wrappers: `run.sh` (daily), `run_optimizer.sh` (weekly).
@@ -170,7 +171,7 @@ mlb-picks-engine/
 ├── config.py               — API keys, weights, thresholds, PARK_FACTORS, UMPIRE_TENDENCIES
 ├── backtest.py             — Historical backtester (python3 backtest.py to run 2024+2025 seasons)
 ├── backtest_cache.py       — SQLite cache for backtest historical data (backtest_cache.db)
-├── monitor.py              — Pitcher scratch monitor; run separately every 30 min (no launchd plist yet)
+├── monitor.py              — Pitcher scratch monitor; runs every 30 min via launchd
 ├── monitor.sh              — Wrapper for monitor.py
 ├── run.sh                  — Wrapper for daily engine runs (launchd)
 ├── run_optimizer.sh        — Wrapper for weekly optimizer (launchd, full PATH for claude CLI)
