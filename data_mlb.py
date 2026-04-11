@@ -730,7 +730,7 @@ def collect_game_data(target_date: str = None) -> list:
         g["home_record"] = fetch_team_record(g["home_team_mlb_id"])
 
         # Fetch weather
-        g["weather"] = fetch_venue_weather(g.get("venue_id"), target_date)
+        g["weather"] = fetch_venue_weather(g.get("venue_id"), target_date, g.get("game_time_utc", ""))
 
         # Attach Statcast — team batting/pitching by abbreviation
         g["away_statcast_bat"] = sc_batting.get(g.get("away_team_abbr", ""), {})
@@ -905,11 +905,15 @@ def fetch_venue_coords(venue_id: int) -> tuple:
         return None, None
 
 
-def fetch_venue_weather(venue_id: int, game_date: str = None) -> dict:
+def fetch_venue_weather(venue_id: int, game_date: str = None, game_time_utc: str = "") -> dict:
     """
     Fetch weather forecast for an MLB venue using Open-Meteo (no API key required).
-    Returns a dict with temp_f, wind_mph, wind_dir, precip_chance, conditions.
+    Returns a dict with temp_f, wind_mph, wind_dir, precip_chance, conditions, forecast_for.
+    Uses game_time_utc (ISO UTC string) to select the correct forecast hour when available.
     """
+    from datetime import datetime, timezone
+    import zoneinfo
+
     lat, lon = fetch_venue_coords(venue_id)
     if lat is None or lon is None:
         return {}
@@ -937,6 +941,24 @@ def fetch_venue_weather(venue_id: int, game_date: str = None) -> dict:
         if idx >= len(times):
             idx = len(times) // 2
 
+        forecast_for = "7:00 PM (estimated)"
+        game_dt_local = None
+        target_hour_str = None
+
+        # Try to find the exact forecast hour from game_time_utc
+        if game_time_utc:
+            try:
+                game_dt_utc = datetime.fromisoformat(game_time_utc.replace("Z", "+00:00"))
+                tz_name = data.get("timezone", "America/New_York")
+                local_tz = zoneinfo.ZoneInfo(tz_name)
+                game_dt_local = game_dt_utc.astimezone(local_tz)
+                target_hour_str = game_dt_local.strftime("%Y-%m-%dT%H:00")
+                if target_hour_str in times:
+                    idx = times.index(target_hour_str)
+                    forecast_for = game_dt_local.strftime("%-I:%M %p %Z")
+            except Exception:
+                pass  # keep default idx
+
         temp_f = hourly.get("temperature_2m", [None])[idx]
         precip = hourly.get("precipitation_probability", [0])[idx] or 0
         wind_mph = hourly.get("windspeed_10m", [0])[idx] or 0
@@ -954,6 +976,7 @@ def fetch_venue_weather(venue_id: int, game_date: str = None) -> dict:
             "precip_chance": precip,
             "conditions": conditions,
             "weathercode": wcode,
+            "forecast_for": forecast_for,
         }
     except Exception as e:
         print(f"[WEATHER] Failed to fetch weather for venue {venue_id}: {e}")
