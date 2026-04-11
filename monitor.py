@@ -54,7 +54,7 @@ def _normalize(name):
     """Normalize pitcher name for comparison."""
     if name is None:
         return None
-    return name.strip().lower()
+    return " ".join(name.split()).lower()
 
 
 def send_scratch_alert(game_label, old_pitcher, new_pitcher):
@@ -70,7 +70,7 @@ def send_scratch_alert(game_label, old_pitcher, new_pitcher):
         return False
     try:
         resp = requests.post(DISCORD_WEBHOOK_URL, json={"content": message}, timeout=10)
-        if resp.status_code == 204:
+        if resp.ok:
             print(f"[MONITOR] Scratch alert sent for {game_label}")
             return True
         else:
@@ -102,16 +102,18 @@ def run_monitor():
     game_ids_to_check = set()
     pick_game_map = {}  # mlb_game_id -> game_id (local)
 
-    for pick in pending_picks:
-        game_id = pick["game_id"]
-        game_row = conn.execute(
-            "SELECT mlb_game_id FROM games WHERE id=?", (game_id,)
-        ).fetchone()
-        if game_row:
-            mlb_id = game_row["mlb_game_id"]
-            game_ids_to_check.add(mlb_id)
-            pick_game_map[mlb_id] = game_id
-    conn.close()
+    try:
+        for pick in pending_picks:
+            game_id = pick["game_id"]
+            game_row = conn.execute(
+                "SELECT mlb_game_id FROM games WHERE id=?", (game_id,)
+            ).fetchone()
+            if game_row:
+                mlb_id = game_row["mlb_game_id"]
+                game_ids_to_check.add(mlb_id)
+                pick_game_map[mlb_id] = game_id
+    finally:
+        conn.close()
 
     if not game_ids_to_check:
         print("[MONITOR] Could not resolve mlb_game_ids for pending picks.")
@@ -135,34 +137,42 @@ def run_monitor():
         current_home = current.get("home")
 
         # Check away pitcher
+        away_changed = False
         if (current_away is not None and
                 _normalize(current_away) != _normalize(stored_away) and
                 _normalize(stored_away) not in (None, "tbd")):
-            if not pitcher_already_alerted(mlb_game_id, today):
+            away_changed = True
+            if not pitcher_already_alerted(mlb_game_id, today, side='away'):
                 print(f"[MONITOR] Away pitcher changed for {game_label}: "
                       f"{stored_away} -> {current_away}")
                 sent = send_scratch_alert(game_label, stored_away, current_away)
                 if sent:
-                    save_scratch_alert(mlb_game_id, today, stored_away, current_away)
+                    save_scratch_alert(mlb_game_id, today, stored_away, current_away, side='away')
             else:
-                print(f"[MONITOR] Already alerted for {game_label} — skipping.")
-            continue
+                print(f"[MONITOR] Already alerted for away pitcher {game_label} — skipping.")
 
         # Check home pitcher
+        home_changed = False
         if (current_home is not None and
                 _normalize(current_home) != _normalize(stored_home) and
                 _normalize(stored_home) not in (None, "tbd")):
-            if not pitcher_already_alerted(mlb_game_id, today):
+            home_changed = True
+            if not pitcher_already_alerted(mlb_game_id, today, side='home'):
                 print(f"[MONITOR] Home pitcher changed for {game_label}: "
                       f"{stored_home} -> {current_home}")
                 sent = send_scratch_alert(game_label, stored_home, current_home)
                 if sent:
-                    save_scratch_alert(mlb_game_id, today, stored_home, current_home)
+                    save_scratch_alert(mlb_game_id, today, stored_home, current_home, side='home')
             else:
-                print(f"[MONITOR] Already alerted for {game_label} — skipping.")
-        else:
+                print(f"[MONITOR] Already alerted for home pitcher {game_label} — skipping.")
+
+        if not away_changed and not home_changed:
             print(f"[MONITOR] No pitcher change detected for {game_label}.")
 
 
-if __name__ == "__main__":
+def main():
     run_monitor()
+
+
+if __name__ == "__main__":
+    main()

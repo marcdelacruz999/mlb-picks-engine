@@ -91,13 +91,15 @@ class TestMonitorPitcherChanged(unittest.TestCase):
         from monitor import run_monitor
         mock_conn = _make_game_conn(777)
         mock_response = MagicMock()
-        mock_response.status_code = 204
+        mock_response.status_code = 200
+        mock_response.ok = True
 
         with patch("monitor.get_connection", return_value=mock_conn), \
              patch("monitor.requests.post", return_value=mock_response) as mock_post:
             run_monitor()
 
         mock_post.assert_called_once()
+        mock_save.assert_called_once()
         payload = mock_post.call_args[1]["json"]
         self.assertIn("PITCHER SCRATCH ALERT", payload["content"])
         self.assertIn("Gerrit Cole", payload["content"])

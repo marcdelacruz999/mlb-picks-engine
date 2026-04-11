@@ -208,10 +208,11 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         game_date TEXT,
         mlb_game_id INTEGER,
+        side TEXT,
         old_pitcher TEXT,
         new_pitcher TEXT,
         alerted_at TEXT,
-        UNIQUE(game_date, mlb_game_id)
+        UNIQUE(game_date, mlb_game_id, side)
     );
 
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
@@ -538,27 +539,27 @@ def get_model_accuracy_summary(days: int = 30) -> dict:
 
 # ── Scratch Alerts ───────────────────────────────────────
 
-def pitcher_already_alerted(mlb_game_id: int, game_date: str) -> bool:
-    """Return True if a scratch alert has already been sent for this game today."""
+def pitcher_already_alerted(mlb_game_id: int, game_date: str, side: str) -> bool:
+    """Return True if a scratch alert has already been sent for this game/side today."""
     conn = get_connection()
     row = conn.execute(
-        "SELECT id FROM scratch_alerts WHERE mlb_game_id=? AND game_date=?",
-        (mlb_game_id, game_date)
+        "SELECT id FROM scratch_alerts WHERE mlb_game_id=? AND game_date=? AND side=?",
+        (mlb_game_id, game_date, side)
     ).fetchone()
     conn.close()
     return row is not None
 
 
-def save_scratch_alert(mlb_game_id: int, game_date: str, old_pitcher: str, new_pitcher: str):
-    """Insert a scratch alert record (one per game per day via UNIQUE constraint)."""
+def save_scratch_alert(mlb_game_id: int, game_date: str, old_pitcher: str, new_pitcher: str, side: str):
+    """Insert a scratch alert record (one per game/side per day via UNIQUE constraint)."""
     conn = get_connection()
     now = datetime.utcnow().isoformat()
     try:
         conn.execute(
             """INSERT OR IGNORE INTO scratch_alerts
-               (game_date, mlb_game_id, old_pitcher, new_pitcher, alerted_at)
-               VALUES (?,?,?,?,?)""",
-            (game_date, mlb_game_id, old_pitcher, new_pitcher, now)
+               (game_date, mlb_game_id, side, old_pitcher, new_pitcher, alerted_at)
+               VALUES (?,?,?,?,?,?)""",
+            (game_date, mlb_game_id, side, old_pitcher, new_pitcher, now)
         )
         conn.commit()
     except Exception as e:
