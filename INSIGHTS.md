@@ -161,6 +161,7 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 | 2026-04-11 | `--refresh` `still_approved` checked only by game id, not pick type → O/U picks could be wrongly cancelled if ML dropped | Fixed: track `approved_by_type = {(mlb_game_id, pick_type)}` |
 | 2026-04-11 | `save_pick` had no dedup — each engine run inserted duplicate picks | Fixed: `pick_already_sent_today()` check before insert; dry run skips DB entirely |
 | 2026-04-11 | `run_results()` sent 0-0-0 Discord recap when no picks existed (missing `return` after "Nothing to grade") or when all picks were already graded | Fixed: early `return` after empty picks check; guard against `total == 0 and pushes == 0` before `send_results()` |
+| 2026-04-11 | `--refresh` sent cancel/reduce alerts for games already in progress or final — not actionable | Fixed: check `refreshed["status"]` in refresh loop; skip anything not in `{Scheduled, Pre-Game, Warmup, Delayed Start}` |
 
 ---
 
