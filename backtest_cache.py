@@ -196,3 +196,13 @@ class BacktestCache:
         if not row:
             return {}
         return {int(k): v for k, v in json.loads(row[0]).items()}
+
+    def clear_season(self, season: int):
+        """Delete all cached data for a given season across all tables."""
+        self.conn.execute("DELETE FROM season_games WHERE season=?", (season,))
+        self.conn.execute("DELETE FROM team_stats WHERE season=?", (season,))
+        self.conn.execute("DELETE FROM pitcher_stats WHERE season=?", (season,))
+        self.conn.execute("DELETE FROM statcast_batting WHERE season=?", (season,))
+        self.conn.execute("DELETE FROM statcast_pitching WHERE season=?", (season,))
+        self.conn.execute("DELETE FROM statcast_pitchers WHERE season=?", (season,))
+        self.conn.commit()

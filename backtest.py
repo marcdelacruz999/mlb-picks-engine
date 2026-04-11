@@ -34,8 +34,7 @@ def load_season_games(season: int, cache: BacktestCache, force: bool = False) ->
     force=True clears cache and re-fetches.
     """
     if force:
-        cache.conn.execute("DELETE FROM season_games WHERE season = ?", (season,))
-        cache.conn.commit()
+        cache.clear_season(season)
 
     if cache.is_season_games_cached(season):
         games = cache.load_season_games(season)
@@ -274,14 +273,15 @@ def confidence_report(results: list) -> dict:
     return buckets
 
 
-def calibration_curve(results: list) -> list:
+def calibration_curve(results: list) -> dict:
     """
     Bucket results by model-predicted win probability and compare to actual win rate.
-    Returns list of dicts sorted by prob_low.
+    Returns dict with 'curve' (list of dicts sorted by prob_low) and 'excluded' count.
     Buckets: 50-55%, 55-60%, 60-65%, 65-70%, 70%+
+    Games with ml_win_probability < 50 are excluded (away picks near neutral).
     """
     if not results:
-        return []
+        return {"curve": [], "excluded": 0}
 
     buckets_def = [(50, 55), (55, 60), (60, 65), (65, 70), (70, 100)]
     buckets = {lo: {"prob_low": lo, "prob_high": hi, "picks": 0, "wins": 0, "actual_win_rate": 0.0}
@@ -299,7 +299,9 @@ def calibration_curve(results: list) -> list:
     for b in buckets.values():
         b["actual_win_rate"] = round(b["wins"] / b["picks"], 3) if b["picks"] > 0 else 0.0
 
-    return [b for b in sorted(buckets.values(), key=lambda x: x["prob_low"]) if b["picks"] > 0]
+    excluded = sum(1 for r in results if r.get("ml_win_probability", 50.0) < 50.0)
+    curve = [b for b in sorted(buckets.values(), key=lambda x: x["prob_low"]) if b["picks"] > 0]
+    return {"curve": curve, "excluded": excluded}
 
 
 def agent_correlation(results: list) -> dict:
@@ -410,7 +412,9 @@ def print_reports(results: list):
     # Report 2: Calibration curve
     print("── CALIBRATION CURVE ──────────────────────────────────────")
     print("  (Are high-confidence predictions actually more accurate?)")
-    curve = calibration_curve(results)
+    cal_result = calibration_curve(results)
+    curve = cal_result["curve"]
+    excluded = cal_result["excluded"]
     for b in curve:
         bar = "█" * int(b["actual_win_rate"] * 20)
         expected_mid = (b["prob_low"] + b["prob_high"]) / 2
@@ -418,6 +422,8 @@ def print_reports(results: list):
         sign = "+" if diff >= 0 else ""
         print(f"  {b['prob_low']:3d}-{b['prob_high']:3d}%: actual={b['actual_win_rate']:.1%}  "
               f"({sign}{diff:.1f}pp vs model)  n={b['picks']}  {bar}")
+    if excluded > 0:
+        print(f"  ({excluded} games excluded — ml_win_probability < 50%, away picks near neutral)")
     print()
 
     # Report 3: Agent correlation
@@ -494,7 +500,7 @@ def main():
     parser.add_argument(
         "--no-cache",
         action="store_true",
-        help="Force re-fetch all data, ignoring cached values"
+        help="Force re-fetch all data for all seasons, clearing the local cache first"
     )
     args = parser.parse_args()
 

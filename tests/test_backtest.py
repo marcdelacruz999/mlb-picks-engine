@@ -274,7 +274,8 @@ def test_calibration_curve_buckets_by_probability():
             "model_pick_side": "home", "agent_scores": {},
             "composite_score": 0.2,
         })
-    curve = backtest.calibration_curve(results)
+    result = backtest.calibration_curve(results)
+    curve = result["curve"]
     assert len(curve) > 0
     bucket = next(b for b in curve if b["prob_low"] <= 62 < b["prob_high"])
     assert bucket["picks"] == 40
