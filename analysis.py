@@ -7,6 +7,7 @@ Produces confidence scores, win probabilities, and pick recommendations.
 
 from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV
 from data_odds import implied_probability, find_value
+from data_mlb import fetch_lineup_batting
 
 
 # ══════════════════════════════════════════════
@@ -165,8 +166,6 @@ def score_offense(game: dict) -> dict:
     home_lineup_ops = None
 
     if away_lineup_ids or home_lineup_ids:
-        from data_mlb import fetch_lineup_batting
-
         if away_lineup_ids:
             away_stats = fetch_lineup_batting(away_lineup_ids)
             if away_stats:
@@ -180,11 +179,11 @@ def score_offense(game: dict) -> dict:
         away_team_ops = _safe(away_b.get("ops"))
         home_team_ops = _safe(home_b.get("ops"))
 
-        if away_lineup_ops and away_team_ops > 0:
+        if away_lineup_ops is not None and away_team_ops > 0:
             diff = (away_lineup_ops - away_team_ops) / away_team_ops
             raw -= diff * 0.5  # away advantage: negative score = away edge
 
-        if home_lineup_ops and home_team_ops > 0:
+        if home_lineup_ops is not None and home_team_ops > 0:
             diff = (home_lineup_ops - home_team_ops) / home_team_ops
             raw += diff * 0.5  # home advantage: positive score = home edge
 
@@ -197,7 +196,7 @@ def score_offense(game: dict) -> dict:
     else:
         edge = "Offenses are comparable"
 
-    if away_lineup_ops or home_lineup_ops:
+    if away_lineup_ops is not None or home_lineup_ops is not None:
         edge += " (confirmed lineup)"
 
     return {

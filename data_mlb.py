@@ -53,13 +53,21 @@ def fetch_lineup_batting(player_ids: list) -> list:
                     "obp": float(stat.get("obp", 0) or 0),
                     "slg": float(stat.get("slg", 0) or 0),
                 }
-        except Exception:
-            return []
+        except Exception as e:
+            print(f"[DATA] Error fetching lineup batting: {e}")
+            # Return whatever is already cached
+            return [_player_stat_cache[pid] for pid in player_ids
+                    if _player_stat_cache.get(pid) is not None]
+
+        # Write sentinel for players not found in API response (prevents re-fetching)
+        for pid in uncached:
+            if pid not in _player_stat_cache:
+                _player_stat_cache[pid] = None  # not found — don't re-fetch
 
     results = []
     for pid in player_ids:
         entry = _player_stat_cache.get(pid)
-        if entry:
+        if entry is not None:
             results.append(entry)
     return results
 

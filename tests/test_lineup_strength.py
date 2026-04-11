@@ -123,7 +123,7 @@ def test_score_offense_with_stronger_home_lineup():
         {"player_id": 103, "ops": 0.900, "obp": 0.380, "slg": 0.520},
     ]
 
-    with patch("data_mlb.fetch_lineup_batting", return_value=fake_lineup_stats):
+    with patch("analysis.fetch_lineup_batting", return_value=fake_lineup_stats):
         result = analysis.score_offense(game)
 
     # Home lineup is much stronger than season avg → positive score
