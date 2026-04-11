@@ -1,0 +1,9 @@
+backtest_cache.db
+mlb_picks.db
+mlb_picks.db-shm
+mlb_picks.db-wal
+engine.log
+__pycache__/
+*.pyc
+.env
+.worktrees/

@@ -1,0 +1,956 @@
+"""
+MLB Picks Engine — Analysis Engine
+====================================
+Implements the weighted decision model with all 7 agents.
+Produces confidence scores, win probabilities, and pick recommendations.
+"""
+
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES
+from data_odds import implied_probability, find_value
+
+
+# ══════════════════════════════════════════════
+#  INDIVIDUAL AGENT SCORING FUNCTIONS
+#  Each returns a score from -1.0 (strong away edge)
+#  to +1.0 (strong home edge), with 0 = neutral.
+# ══════════════════════════════════════════════
+
+def score_pitching(game: dict) -> dict:
+    """
+    PITCHING AGENT — Compare starting pitchers.
+    Factors: ERA, WHIP, K/BB, K/9, handedness matchup.
+    """
+    home_p = game.get("home_pitcher_stats", {})
+    away_p = game.get("away_pitcher_stats", {})
+
+    if not home_p or not away_p:
+        return {"score": 0.0, "edge": "Insufficient pitcher data", "detail": {}}
+
+    # Lower ERA = better → advantage to the team whose pitcher has lower ERA
+    era_diff = _safe(away_p.get("era")) - _safe(home_p.get("era"))
+    whip_diff = _safe(away_p.get("whip")) - _safe(home_p.get("whip"))
+    k9_diff = _safe(home_p.get("k_per_9")) - _safe(away_p.get("k_per_9"))
+    bb9_diff = _safe(away_p.get("bb_per_9")) - _safe(home_p.get("bb_per_9"))
+    kbb_diff = _safe(home_p.get("k_bb_ratio")) - _safe(away_p.get("k_bb_ratio"))
+
+    # Weighted pitching score
+    raw = (
+        era_diff * 0.30 +
+        whip_diff * 0.25 +
+        k9_diff * 0.05 +
+        bb9_diff * 0.10 +
+        kbb_diff * 0.10
+    )
+
+    score = _clamp(raw / 3.0)
+
+    # ── Handedness matchup adjustment ──
+    # LH starters are rarer; batters tend to have worse splits vs opposite hand.
+    # Proxy: if a team K-rate is above league avg AND they're facing a tough lefty,
+    # apply a mild penalty on the batting side.
+    home_throws = home_p.get("throws", "R")
+    away_throws = away_p.get("throws", "R")
+    home_b = game.get("home_batting", {})
+    away_b = game.get("away_batting", {})
+    lg_k_rate = 0.225  # approx MLB average K-rate
+
+    away_k_rate = _safe(away_b.get("strikeouts")) / max(_safe(away_b.get("at_bats")), 1)
+    home_k_rate = _safe(home_b.get("strikeouts")) / max(_safe(home_b.get("at_bats")), 1)
+
+    handedness_notes = []
+    # Home LHP vs K-prone away lineup
+    if home_throws == "L" and away_k_rate > lg_k_rate + 0.02:
+        score += 0.06
+        handedness_notes.append(f"Home LHP vs K-prone away lineup ({away_k_rate:.1%} K-rate)")
+    # Away LHP vs K-prone home lineup
+    if away_throws == "L" and home_k_rate > lg_k_rate + 0.02:
+        score -= 0.06
+        handedness_notes.append(f"Away LHP vs K-prone home lineup ({home_k_rate:.1%} K-rate)")
+
+    score = _clamp(score)
+
+    # Determine narrative
+    if score > 0.15:
+        edge = f"Home SP ({home_p.get('name','?')}, {home_throws}HP) has clear pitching advantage"
+    elif score < -0.15:
+        edge = f"Away SP ({away_p.get('name','?')}, {away_throws}HP) has clear pitching advantage"
+    else:
+        edge = f"Pitching matchup even ({home_p.get('name','?')} {home_throws}HP vs {away_p.get('name','?')} {away_throws}HP)"
+
+    if handedness_notes:
+        edge += f" | {handedness_notes[0]}"
+
+    # ── Pitcher rest adjustment ──
+    rest_notes = []
+    home_rest = home_p.get("days_rest")
+    away_rest = away_p.get("days_rest")
+
+    if home_rest is not None:
+        if home_rest <= 3:
+            score -= 0.12
+            rest_notes.append(f"Home SP short rest ({home_rest}d)")
+        elif home_rest in (5, 6):
+            score += 0.05
+            rest_notes.append(f"Home SP extra rest ({home_rest}d)")
+        elif home_rest >= 8:
+            score -= 0.03
+            rest_notes.append(f"Home SP extended layoff ({home_rest}d) — rust risk")
+
+    if away_rest is not None:
+        if away_rest <= 3:
+            score += 0.12
+            rest_notes.append(f"Away SP short rest ({away_rest}d)")
+        elif away_rest in (5, 6):
+            score -= 0.05
+            rest_notes.append(f"Away SP extra rest ({away_rest}d)")
+        elif away_rest >= 8:
+            score += 0.03
+            rest_notes.append(f"Away SP extended layoff ({away_rest}d) — rust risk")
+
+    score = _clamp(score)
+
+    if rest_notes:
+        edge += f" | {rest_notes[0]}"
+
+    return {
+        "score": round(score, 3),
+        "edge": edge,
+        "detail": {
+            "home_era": home_p.get("era"),
+            "away_era": away_p.get("era"),
+            "home_whip": home_p.get("whip"),
+            "away_whip": away_p.get("whip"),
+            "home_kbb": home_p.get("k_bb_ratio"),
+            "away_kbb": away_p.get("k_bb_ratio"),
+            "home_throws": home_throws,
+            "away_throws": away_throws,
+            "home_days_rest": home_rest,
+            "away_days_rest": away_rest,
+        }
+    }
+
+
+def score_offense(game: dict) -> dict:
+    """
+    LINEUP AGENT — Compare team offensive strength.
+    Factors: OPS, OBP, SLG, runs per game.
+    """
+    home_b = game.get("home_batting", {})
+    away_b = game.get("away_batting", {})
+
+    if not home_b or not away_b:
+        return {"score": 0.0, "edge": "Insufficient batting data", "detail": {}}
+
+    ops_diff = _safe(home_b.get("ops")) - _safe(away_b.get("ops"))
+    obp_diff = _safe(home_b.get("obp")) - _safe(away_b.get("obp"))
+    slg_diff = _safe(home_b.get("slg")) - _safe(away_b.get("slg"))
+
+    # Runs per game
+    home_rpg = _safe(home_b.get("runs")) / max(_safe(home_b.get("games_played")), 1)
+    away_rpg = _safe(away_b.get("runs")) / max(_safe(away_b.get("games_played")), 1)
+    rpg_diff = home_rpg - away_rpg
+
+    raw = (
+        ops_diff * 3.0 +       # OPS diff of .050 is significant
+        obp_diff * 2.0 +
+        slg_diff * 2.0 +
+        rpg_diff * 0.15
+    )
+
+    score = _clamp(raw / 1.5)
+
+    if score > 0.15:
+        edge = "Home lineup has offensive advantage"
+    elif score < -0.15:
+        edge = "Away lineup has offensive advantage"
+    else:
+        edge = "Offenses are comparable"
+
+    return {
+        "score": round(score, 3),
+        "edge": edge,
+        "detail": {
+            "home_ops": home_b.get("ops"),
+            "away_ops": away_b.get("ops"),
+            "home_rpg": round(home_rpg, 2),
+            "away_rpg": round(away_rpg, 2),
+        }
+    }
+
+
+def score_bullpen(game: dict) -> dict:
+    """
+    BULLPEN AGENT — Compare team bullpen strength.
+    Factors: team pitching ERA, WHIP, K/9 (as bullpen proxy).
+    """
+    home_bp = game.get("home_pitching", {})
+    away_bp = game.get("away_pitching", {})
+
+    if not home_bp or not away_bp:
+        return {"score": 0.0, "edge": "Insufficient bullpen data", "detail": {}}
+
+    era_diff = _safe(away_bp.get("era")) - _safe(home_bp.get("era"))
+    whip_diff = _safe(away_bp.get("whip")) - _safe(home_bp.get("whip"))
+    k9_diff = _safe(home_bp.get("k_per_9")) - _safe(away_bp.get("k_per_9"))
+
+    # Factor in save reliability
+    home_sv = _safe(home_bp.get("saves"))
+    home_svo = max(_safe(home_bp.get("save_opportunities")), 1)
+    away_sv = _safe(away_bp.get("saves"))
+    away_svo = max(_safe(away_bp.get("save_opportunities")), 1)
+    save_pct_diff = (home_sv / home_svo) - (away_sv / away_svo)
+
+    raw = (
+        era_diff * 0.30 +
+        whip_diff * 0.25 +
+        k9_diff * 0.03 +
+        save_pct_diff * 0.5
+    )
+
+    score = _clamp(raw / 2.0)
+
+    if score > 0.15:
+        edge = "Home bullpen is stronger"
+    elif score < -0.15:
+        edge = "Away bullpen is stronger"
+    else:
+        edge = "Bullpens are comparable"
+
+    return {
+        "score": round(score, 3),
+        "edge": edge,
+        "detail": {
+            "home_bp_era": home_bp.get("era"),
+            "away_bp_era": away_bp.get("era"),
+        }
+    }
+
+
+def score_advanced(game: dict) -> dict:
+    """
+    ADVANCED METRICS AGENT — Statcast-powered edge detection.
+
+    Real signals (when Statcast available):
+    - xwOBA vs wOBA luck diff: team outperforming/underperforming contact quality
+    - Barrel rate differential: who hits the ball harder
+    - Pitcher xERA vs ERA: regression incoming for lucky/unlucky starters
+    - Hard-hit rate differential
+
+    Falls back to plate discipline + WHIP/ERA proxy if Statcast unavailable.
+    """
+    home_sc_bat = game.get("home_statcast_bat", {})
+    away_sc_bat = game.get("away_statcast_bat", {})
+    home_sc_pit = game.get("home_statcast_pit", {})
+    away_sc_pit = game.get("away_statcast_pit", {})
+    home_sp_sc  = game.get("home_pitcher_statcast", {})
+    away_sp_sc  = game.get("away_pitcher_statcast", {})
+    home_p      = game.get("home_pitcher_stats", {})
+    away_p      = game.get("away_pitcher_stats", {})
+    home_b      = game.get("home_batting", {})
+    away_b      = game.get("away_batting", {})
+
+    signals = []
+    score = 0.0
+    has_statcast = bool(home_sc_bat and away_sc_bat)
+
+    if has_statcast:
+        # ── xwOBA luck differential ──
+        # woba_diff = actual wOBA - xwOBA. Positive = team is outperforming contact (lucky).
+        # A lucky team is likely to regress; unlucky team likely to improve.
+        home_luck = _safe(home_sc_bat.get("woba_diff"))  # + = lucky home offense
+        away_luck = _safe(away_sc_bat.get("woba_diff"))  # + = lucky away offense
+
+        # Unlucky away offense facing home team = away might bounce back
+        if away_luck < -0.015:
+            score -= 0.12
+            signals.append(f"Away offense underperforming xwOBA by {abs(away_luck):.3f} — positive regression likely")
+        elif away_luck > 0.020:
+            score += 0.08
+            signals.append(f"Away offense overperforming xwOBA by {away_luck:.3f} — regression risk")
+
+        if home_luck < -0.015:
+            score += 0.12
+            signals.append(f"Home offense underperforming xwOBA by {abs(home_luck):.3f} — positive regression likely")
+        elif home_luck > 0.020:
+            score -= 0.08
+            signals.append(f"Home offense overperforming xwOBA by {home_luck:.3f} — regression risk")
+
+        # ── Barrel rate differential ──
+        # Higher barrel rate = hitting the ball harder and at better angles
+        home_barrel = _safe(home_sc_bat.get("barrel_pct"))
+        away_barrel = _safe(away_sc_bat.get("barrel_pct"))
+        barrel_diff = home_barrel - away_barrel
+
+        if abs(barrel_diff) >= 2.0:
+            score += _clamp(barrel_diff * 0.04)
+            leader = "Home" if barrel_diff > 0 else "Away"
+            signals.append(f"{leader} barrel rate advantage ({home_barrel:.1f}% vs {away_barrel:.1f}%)")
+
+        # ── Hard-hit rate differential ──
+        home_hh = _safe(home_sc_bat.get("hard_hit_pct"))
+        away_hh = _safe(away_sc_bat.get("hard_hit_pct"))
+        hh_diff = home_hh - away_hh
+
+        if abs(hh_diff) >= 4.0:
+            score += _clamp(hh_diff * 0.015)
+            leader = "Home" if hh_diff > 0 else "Away"
+            signals.append(f"{leader} hard-hit rate edge ({home_hh:.1f}% vs {away_hh:.1f}%)")
+
+        # ── Pitcher xERA regression signal ──
+        # era_minus_xera: negative = ERA < xERA = pitcher is lucky, ERA should rise
+        #                 positive = ERA > xERA = pitcher is unlucky, ERA should fall
+        if home_sp_sc:
+            diff = _safe(home_sp_sc.get("era_minus_xera"))
+            xera = _safe(home_sp_sc.get("xera"))
+            era  = _safe(home_sp_sc.get("era"))
+            if xera > 0 and diff < -0.60:  # ERA much lower than xERA = getting lucky
+                score -= 0.12
+                signals.append(f"Home SP luck warning: ERA {era:.2f} vs xERA {xera:.2f} — regression risk")
+            elif xera > 0 and diff > 0.75:  # ERA much higher than xERA = getting unlucky
+                score += 0.10
+                signals.append(f"Home SP undervalued: ERA {era:.2f} but xERA {xera:.2f} — improvement likely")
+
+        if away_sp_sc:
+            diff = _safe(away_sp_sc.get("era_minus_xera"))
+            xera = _safe(away_sp_sc.get("xera"))
+            era  = _safe(away_sp_sc.get("era"))
+            if xera > 0 and diff < -0.60:
+                score += 0.12
+                signals.append(f"Away SP luck warning: ERA {era:.2f} vs xERA {xera:.2f} — regression risk")
+            elif xera > 0 and diff > 0.75:
+                score -= 0.10
+                signals.append(f"Away SP undervalued: ERA {era:.2f} but xERA {xera:.2f} — improvement likely")
+
+    else:
+        # ── Fallback: plate discipline + WHIP/ERA proxy ──
+        home_avg = _safe(home_b.get("avg"))
+        home_obp = _safe(home_b.get("obp"))
+        away_avg = _safe(away_b.get("avg"))
+        away_obp = _safe(away_b.get("obp"))
+
+        home_discipline = home_obp - home_avg
+        away_discipline = away_obp - away_avg
+
+        if home_discipline > away_discipline + 0.015:
+            score += 0.12
+            signals.append("Home has better plate discipline (walk-driven OBP)")
+        elif away_discipline > home_discipline + 0.015:
+            score -= 0.12
+            signals.append("Away has better plate discipline (walk-driven OBP)")
+
+        if home_p:
+            era = _safe(home_p.get("era"))
+            whip = _safe(home_p.get("whip"))
+            if whip > 1.35 and era < 3.50:
+                score -= 0.10
+                signals.append(f"Home SP may regress: ERA {era} vs WHIP {whip}")
+
+        if away_p:
+            era = _safe(away_p.get("era"))
+            whip = _safe(away_p.get("whip"))
+            if whip > 1.35 and era < 3.50:
+                score += 0.10
+                signals.append(f"Away SP may regress: ERA {era} vs WHIP {whip}")
+
+        # K-rate mismatch
+        home_k_rate = _safe(home_b.get("strikeouts")) / max(_safe(home_b.get("at_bats")), 1)
+        away_k_rate = _safe(away_b.get("strikeouts")) / max(_safe(away_b.get("at_bats")), 1)
+        home_p_k9 = _safe(home_p.get("k_per_9")) if home_p else 0
+        away_p_k9 = _safe(away_p.get("k_per_9")) if away_p else 0
+
+        if away_k_rate > 0.24 and home_p_k9 > 9.0:
+            score += 0.15
+            signals.append("Away lineup K-prone vs high-K home starter")
+        if home_k_rate > 0.24 and away_p_k9 > 9.0:
+            score -= 0.15
+            signals.append("Home lineup K-prone vs high-K away starter")
+
+    score = _clamp(score)
+    edge = "; ".join(signals) if signals else (
+        "Statcast: no significant edge detected" if has_statcast
+        else "No significant advanced edge detected"
+    )
+
+    return {
+        "score": round(score, 3),
+        "edge": edge,
+        "detail": {
+            "statcast_available": has_statcast,
+            "home_barrel_pct": home_sc_bat.get("barrel_pct"),
+            "away_barrel_pct": away_sc_bat.get("barrel_pct"),
+            "home_xwoba": home_sc_bat.get("xwoba"),
+            "away_xwoba": away_sc_bat.get("xwoba"),
+        }
+    }
+
+
+def score_momentum(game: dict) -> dict:
+    """
+    MOMENTUM & CONTEXT AGENT — Recent streaks and situational factors.
+    """
+    home_r = game.get("home_record", {})
+    away_r = game.get("away_record", {})
+
+    score = 0.0
+    signals = []
+
+    # Win streak bonus
+    home_streak = home_r.get("streak_number", 0) if home_r.get("streak_type") == "W" else 0
+    away_streak = away_r.get("streak_number", 0) if away_r.get("streak_type") == "W" else 0
+
+    # Losing streak penalty
+    home_lstreak = home_r.get("streak_number", 0) if home_r.get("streak_type") == "L" else 0
+    away_lstreak = away_r.get("streak_number", 0) if away_r.get("streak_type") == "L" else 0
+
+    if home_streak >= 5:
+        score += 0.2
+        signals.append(f"Home on {home_streak}-game win streak")
+    elif home_streak >= 3:
+        score += 0.1
+        signals.append(f"Home on {home_streak}-game win streak")
+
+    if away_streak >= 5:
+        score -= 0.2
+        signals.append(f"Away on {away_streak}-game win streak")
+    elif away_streak >= 3:
+        score -= 0.1
+        signals.append(f"Away on {away_streak}-game win streak")
+
+    if home_lstreak >= 4:
+        score -= 0.15
+        signals.append(f"Home on {home_lstreak}-game losing streak")
+    if away_lstreak >= 4:
+        score += 0.15
+        signals.append(f"Away on {away_lstreak}-game losing streak")
+
+    # Win percentage differential
+    home_wpct = _safe(home_r.get("win_pct"))
+    away_wpct = _safe(away_r.get("win_pct"))
+    wpct_diff = home_wpct - away_wpct
+
+    if abs(wpct_diff) > 0.100:
+        score += _clamp(wpct_diff * 1.5)
+        if wpct_diff > 0:
+            signals.append(f"Home has significantly better record ({home_wpct:.3f} vs {away_wpct:.3f})")
+        else:
+            signals.append(f"Away has significantly better record ({away_wpct:.3f} vs {home_wpct:.3f})")
+
+    score = _clamp(score)
+    edge = "; ".join(signals) if signals else "No significant momentum edge"
+
+    return {"score": round(score, 3), "edge": edge, "detail": {}}
+
+
+def score_weather(game: dict) -> dict:
+    """
+    WEATHER & BALLPARK AGENT
+    Uses Open-Meteo forecast data attached to the game dict.
+    Factors: wind (speed + direction), temperature, rain chance.
+    Positive score = favors OVER (high-scoring conditions).
+    Negative score = favors UNDER (pitcher-friendly conditions).
+    """
+    wx = game.get("weather", {})
+    if not wx:
+        return {
+            "score": 0.0,
+            "edge": "Weather data unavailable",
+            "detail": {}
+        }
+
+    score = 0.0
+    notes = []
+
+    temp_f = wx.get("temp_f")
+    wind_mph = wx.get("wind_mph", 0)
+    wind_dir = wx.get("wind_dir", "")
+    precip = wx.get("precip_chance", 0)
+    conditions = wx.get("conditions", "")
+
+    # Temperature: cold suppresses offense, heat is neutral
+    if temp_f is not None:
+        if temp_f < 45:
+            score -= 0.15
+            notes.append(f"Cold ({temp_f}°F) — suppresses offense")
+        elif temp_f < 55:
+            score -= 0.07
+            notes.append(f"Cool ({temp_f}°F) — slightly pitcher-friendly")
+        elif temp_f > 85:
+            score += 0.05
+            notes.append(f"Hot ({temp_f}°F) — ball carries well")
+        else:
+            notes.append(f"Temp {temp_f}°F (neutral)")
+
+    # Wind: out = hitter-friendly, in = pitcher-friendly
+    if wind_mph >= 10:
+        out_dirs = {"E", "SE", "NE"}   # blowing toward OF in most parks
+        in_dirs = {"W", "SW", "NW"}
+        if wind_dir in out_dirs:
+            bonus = min(0.20, wind_mph * 0.008)
+            score += bonus
+            notes.append(f"Wind {wind_mph}mph {wind_dir} (out — hitter-friendly)")
+        elif wind_dir in in_dirs:
+            penalty = min(0.20, wind_mph * 0.008)
+            score -= penalty
+            notes.append(f"Wind {wind_mph}mph {wind_dir} (in — pitcher-friendly)")
+        else:
+            notes.append(f"Wind {wind_mph}mph {wind_dir} (crosswind, neutral)")
+    else:
+        notes.append(f"Wind {wind_mph}mph (calm)")
+
+    # Rain / storms: increases uncertainty, slight negative for totals
+    if precip >= 70:
+        score -= 0.10
+        notes.append(f"High rain chance ({precip}%) — game may be delayed/shortened")
+    elif precip >= 40:
+        score -= 0.05
+        notes.append(f"Rain chance {precip}%")
+
+    # Severe conditions (thunderstorm, heavy rain)
+    if any(w in conditions for w in ("Thunderstorm", "Heavy rain", "Heavy showers")):
+        score -= 0.10
+        notes.append(f"Severe weather: {conditions}")
+
+    # ── Park factor ──
+    home_abbr = game.get("home_team_abbr", "")
+    park_factor = PARK_FACTORS.get(home_abbr, 1.00)
+    park_adj = (park_factor - 1.0) * 0.5  # scale: ±0.28 max → ±0.14 score adj
+    score += park_adj
+    if abs(park_factor - 1.0) >= 0.03:
+        label = "Hitter-friendly" if park_factor > 1.0 else "Pitcher-friendly"
+        notes.append(f"{label} park ({home_abbr}, factor {park_factor:.2f})")
+
+    # ── Umpire ──
+    hp_umpire = game.get("hp_umpire", "")
+    ump_data = UMPIRE_TENDENCIES.get(hp_umpire, {}) if hp_umpire else {}
+    ump_run_factor = ump_data.get("run_factor", 0.0)
+    if ump_run_factor:
+        score += ump_run_factor
+        direction = "more runs" if ump_run_factor > 0 else "fewer runs"
+        notes.append(f"HP Ump {hp_umpire}: {direction} zone ({ump_run_factor:+.2f})")
+    elif hp_umpire:
+        notes.append(f"HP Ump: {hp_umpire}")
+
+    score = _clamp(score)
+
+    edge_parts = []
+    if conditions and temp_f:
+        edge_parts.append(f"{conditions}, {temp_f}°F")
+    if wind_mph >= 5:
+        edge_parts.append(f"Wind {wind_mph}mph {wind_dir}")
+    if precip >= 20:
+        edge_parts.append(f"Rain {precip}%")
+    if abs(park_factor - 1.0) >= 0.03:
+        edge_parts.append(f"Park {park_factor:.2f}x")
+    if hp_umpire:
+        edge_parts.append(f"Ump: {hp_umpire}")
+    edge_str = " | ".join(edge_parts) if edge_parts else "; ".join(notes[:2])
+
+    return {
+        "score": round(score, 3),
+        "edge": edge_str,
+        "detail": {**wx, "park_factor": park_factor, "hp_umpire": hp_umpire},
+    }
+
+
+def score_market(game: dict, odds_data: dict) -> dict:
+    """
+    MARKET VALUE AGENT — Compare our model probability against market odds.
+    """
+    if not odds_data:
+        return {"score": 0.0, "edge": "No odds data available", "detail": {}}
+
+    consensus = odds_data.get("consensus", {})
+    home_ml = consensus.get("home_ml")
+    away_ml = consensus.get("away_ml")
+
+    if not home_ml or not away_ml:
+        return {"score": 0.0, "edge": "Incomplete odds data", "detail": {}}
+
+    home_implied = implied_probability(home_ml)
+    away_implied = implied_probability(away_ml)
+
+    return {
+        "score": 0.0,  # Will be calculated in the main analysis after model prob is known
+        "edge": "",
+        "detail": {
+            "home_ml": home_ml,
+            "away_ml": away_ml,
+            "home_implied_prob": round(home_implied, 3),
+            "away_implied_prob": round(away_implied, 3),
+            "total_line": consensus.get("total_line"),
+            "over_price": consensus.get("over_price"),
+            "under_price": consensus.get("under_price"),
+            "home_rl": consensus.get("home_rl"),
+            "away_rl": consensus.get("away_rl"),
+            "home_rl_price": consensus.get("home_rl_price"),
+            "away_rl_price": consensus.get("away_rl_price"),
+        }
+    }
+
+
+# ══════════════════════════════════════════════
+#  MASTER ANALYSIS — Combine all agents
+# ══════════════════════════════════════════════
+
+def analyze_game(game: dict, odds_data: dict = None) -> dict:
+    """
+    Run all agents and produce a final analysis for a single game.
+    Returns the full analysis dict.
+    """
+    # Run each agent
+    pitching = score_pitching(game)
+    offense = score_offense(game)
+    bullpen = score_bullpen(game)
+    advanced = score_advanced(game)
+    momentum = score_momentum(game)
+    weather = score_weather(game)
+    market = score_market(game, odds_data)
+
+    # ── Weighted composite score ──
+    # Positive = home edge, Negative = away edge
+    composite = (
+        pitching["score"] * WEIGHTS["pitching"] +
+        offense["score"] * WEIGHTS["offense"] +
+        bullpen["score"] * WEIGHTS["bullpen"] +
+        advanced["score"] * WEIGHTS["advanced"] +
+        momentum["score"] * WEIGHTS["momentum"] +
+        weather["score"] * WEIGHTS["weather"]
+        # Market weight applied separately after probability calculation
+    )
+
+    # ── Convert to win probability ──
+    # Composite in [-1, 1] → probability via sigmoid-like transform
+    # 0.0 composite → 50% (with home-field bump to ~52%)
+    HOME_FIELD_ADVANTAGE = 0.04  # ~4% bump for home team
+    base_prob = 0.50 + (composite * 0.35) + HOME_FIELD_ADVANTAGE
+    home_win_prob = _clamp_prob(base_prob)
+    away_win_prob = 1.0 - home_win_prob
+
+    # ── Market value edge ──
+    market_edge = 0.0
+    market_narrative = "No odds data"
+    if odds_data and odds_data.get("consensus"):
+        consensus = odds_data["consensus"]
+        home_ml = consensus.get("home_ml")
+        away_ml = consensus.get("away_ml")
+
+        if home_ml and away_ml:
+            home_implied = implied_probability(home_ml)
+            away_implied = implied_probability(away_ml)
+
+            home_value = find_value(home_win_prob, home_implied)
+            away_value = find_value(away_win_prob, away_implied)
+
+            if home_value > away_value:
+                market_edge = home_value
+                market_narrative = f"Home has +{home_value:.1%} edge vs market (implied {home_implied:.1%}, model {home_win_prob:.1%})"
+            else:
+                market_edge = -away_value
+                market_narrative = f"Away has +{away_value:.1%} edge vs market (implied {away_implied:.1%}, model {away_win_prob:.1%})"
+
+            market["score"] = _clamp(market_edge * 5)  # Scale for weighting
+            market["edge"] = market_narrative
+
+    # Recalculate with market weight
+    final_composite = composite + market["score"] * WEIGHTS["market"]
+
+    # ── Determine pick direction ──
+    if final_composite > 0:
+        pick_side = "home"
+        pick_team = game.get("home_team_name", "Home")
+        pick_prob = home_win_prob
+    else:
+        pick_side = "away"
+        pick_team = game.get("away_team_name", "Away")
+        pick_prob = away_win_prob
+
+    edge_score = abs(final_composite)
+
+    # ── Confidence score (1-10) ──
+    confidence = _edge_to_confidence(edge_score)
+
+    # ── Projected score ──
+    projected = _project_score(game, odds_data)
+
+    # ── Over/Under analysis ──
+    ou_pick = _analyze_over_under(game, odds_data, projected)
+
+    # ── Lineup status ──
+    home_lineup_confirmed = game.get("home_lineup_confirmed", False)
+    away_lineup_confirmed = game.get("away_lineup_confirmed", False)
+    lineups_confirmed = home_lineup_confirmed and away_lineup_confirmed
+    lineup_status = "Lineups confirmed" if lineups_confirmed else (
+        "Lineup TBD — monitor before first pitch"
+    )
+
+    # ── Assemble result ──
+    analysis = {
+        "game": f"{game.get('away_team_name', '?')} @ {game.get('home_team_name', '?')}",
+        "away_team": game.get("away_team_name", "?"),
+        "home_team": game.get("home_team_name", "?"),
+        "away_pitcher": game.get("away_pitcher_name", "TBD"),
+        "home_pitcher": game.get("home_pitcher_name", "TBD"),
+        "mlb_game_id": game.get("mlb_game_id"),
+        "lineup_status": lineup_status,
+        "lineups_confirmed": lineups_confirmed,
+
+        # Moneyline analysis
+        "ml_pick_side": pick_side,
+        "ml_pick_team": pick_team,
+        "ml_win_probability": round(pick_prob * 100, 1),
+        "ml_edge_score": round(edge_score, 3),
+        "ml_confidence": confidence,
+
+        # Over/Under analysis
+        "ou_pick": ou_pick,
+
+        # Projected score
+        "projected_away_score": projected["away"],
+        "projected_home_score": projected["home"],
+        "projected_total": projected["total"],
+
+        # Agent details
+        "agents": {
+            "pitching": pitching,
+            "offense": offense,
+            "bullpen": bullpen,
+            "advanced": advanced,
+            "momentum": momentum,
+            "weather": weather,
+            "market": market,
+        },
+
+        "composite_score": round(final_composite, 3),
+    }
+
+    return analysis
+
+
+def _project_score(game: dict, odds_data: dict) -> dict:
+    """Estimate projected final score."""
+    home_b = game.get("home_batting", {})
+    away_b = game.get("away_batting", {})
+
+    home_rpg = _safe(home_b.get("runs")) / max(_safe(home_b.get("games_played")), 1)
+    away_rpg = _safe(away_b.get("runs")) / max(_safe(away_b.get("games_played")), 1)
+
+    if home_rpg == 0:
+        home_rpg = 4.3  # league average fallback
+    if away_rpg == 0:
+        away_rpg = 4.3
+
+    # Adjust by opponent pitching quality
+    home_p_era = _safe(game.get("home_pitching", {}).get("era"))
+    away_p_era = _safe(game.get("away_pitching", {}).get("era"))
+    lg_avg_era = 4.20  # approximate league average
+
+    # Away team scores adjusted by home pitching; Home team by away pitching
+    away_projected = away_rpg * (home_p_era / lg_avg_era) if home_p_era > 0 else away_rpg
+    home_projected = home_rpg * (away_p_era / lg_avg_era) if away_p_era > 0 else home_rpg
+
+    # Apply park factor (Coors adds runs, Oracle Park suppresses them)
+    home_abbr = game.get("home_team_abbr", "")
+    park_factor = PARK_FACTORS.get(home_abbr, 1.00)
+    away_projected *= park_factor
+    home_projected *= park_factor
+
+    # Blend with total line if available
+    if odds_data and odds_data.get("consensus", {}).get("total_line"):
+        total_line = odds_data["consensus"]["total_line"]
+        model_total = away_projected + home_projected
+        blended_total = (model_total * 0.6) + (total_line * 0.4)
+        ratio = blended_total / max(model_total, 0.1)
+        away_projected *= ratio
+        home_projected *= ratio
+
+    return {
+        "away": round(away_projected, 1),
+        "home": round(home_projected, 1),
+        "total": round(away_projected + home_projected, 1),
+    }
+
+
+def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
+    """Determine if there's an over/under edge."""
+    if not odds_data or not odds_data.get("consensus", {}).get("total_line"):
+        return {"pick": None, "confidence": 0, "edge": "No total line available"}
+
+    total_line = odds_data["consensus"]["total_line"]
+    model_total = projected["total"]
+    diff = model_total - total_line
+
+    if abs(diff) < 0.5:
+        return {"pick": None, "confidence": 0, "edge": "Projected total too close to line"}
+
+    if diff > 0:
+        pick = "over"
+        edge_desc = f"Model projects {model_total} runs vs line of {total_line} (+{diff:.1f})"
+    else:
+        pick = "under"
+        edge_desc = f"Model projects {model_total} runs vs line of {total_line} ({diff:.1f})"
+
+    # Confidence based on how far off the line
+    if abs(diff) >= 2.0:
+        conf = 9
+    elif abs(diff) >= 1.5:
+        conf = 8
+    elif abs(diff) >= 1.0:
+        conf = 7
+    elif abs(diff) >= 0.5:
+        conf = 6
+    else:
+        conf = 5
+
+    return {"pick": pick, "confidence": conf, "edge": edge_desc, "total_line": total_line}
+
+
+# ══════════════════════════════════════════════
+#  RISK AGENT — Filter and approve only strong picks
+# ══════════════════════════════════════════════
+
+def build_watchlist(analyses: list, approved: list) -> list:
+    """
+    WATCHLIST — Games near the threshold worth monitoring before first pitch.
+    Confidence 5-6, not approved, but close enough that a line move or
+    pitcher scratch could push them over.
+    """
+    approved_ids = {p["mlb_game_id"] for p in approved}
+    watchlist = []
+
+    for a in analyses:
+        if a["mlb_game_id"] in approved_ids:
+            continue
+        if a["ml_confidence"] in (5, 6):
+            watchlist.append({
+                "game": a["game"],
+                "mlb_game_id": a["mlb_game_id"],
+                "confidence": a["ml_confidence"],
+                "edge_score": a["ml_edge_score"],
+                "pick_team": a["ml_pick_team"],
+                "win_probability": a["ml_win_probability"],
+                "reason": "Near threshold — monitor for lineup/line changes before first pitch",
+            })
+        elif a.get("ou_pick", {}).get("confidence") in (5, 6):
+            ou = a["ou_pick"]
+            watchlist.append({
+                "game": a["game"],
+                "mlb_game_id": a["mlb_game_id"],
+                "confidence": ou["confidence"],
+                "edge_score": a["ml_edge_score"],
+                "pick_team": f"{ou['pick'].upper()} {ou.get('total_line', '')}",
+                "win_probability": a["ml_win_probability"],
+                "reason": "O/U near threshold — watch for weather or line movement",
+            })
+
+    watchlist.sort(key=lambda x: x["confidence"], reverse=True)
+    return watchlist[:5]
+
+
+def risk_filter(analyses: list) -> list:
+    """
+    RISK AGENT — Only approve picks that meet strict quality thresholds.
+    Returns approved picks, sorted by confidence.
+    """
+    approved = []
+
+    for a in analyses:
+        # Moneyline pick evaluation
+        if (a["ml_confidence"] >= MIN_CONFIDENCE and
+                a["ml_edge_score"] >= MIN_EDGE_SCORE):
+            approved.append({
+                "type": "moneyline",
+                "game": a["game"],
+                "away_team": a["away_team"],
+                "home_team": a["home_team"],
+                "pick_team": a["ml_pick_team"],
+                "pick_type": "moneyline",
+                "confidence": a["ml_confidence"],
+                "win_probability": a["ml_win_probability"],
+                "edge_score": a["ml_edge_score"],
+                "projected_away_score": a["projected_away_score"],
+                "projected_home_score": a["projected_home_score"],
+                "edge_pitching": a["agents"]["pitching"]["edge"],
+                "edge_offense": a["agents"]["offense"]["edge"],
+                "edge_advanced": a["agents"]["advanced"]["edge"],
+                "edge_bullpen": a["agents"]["bullpen"]["edge"],
+                "edge_weather": a["agents"]["weather"]["edge"],
+                "edge_market": a["agents"]["market"]["edge"],
+                "notes": a.get("lineup_status", ""),
+                "mlb_game_id": a["mlb_game_id"],
+                "analysis": a,
+            })
+
+        # Over/Under pick evaluation
+        ou = a.get("ou_pick", {})
+        if ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE:
+            approved.append({
+                "type": "over_under",
+                "game": a["game"],
+                "away_team": a["away_team"],
+                "home_team": a["home_team"],
+                "pick_team": ou["pick"].upper(),
+                "pick_type": ou["pick"],
+                "confidence": ou["confidence"],
+                "win_probability": a["ml_win_probability"],
+                "edge_score": a["ml_edge_score"],
+                "projected_away_score": a["projected_away_score"],
+                "projected_home_score": a["projected_home_score"],
+                "edge_pitching": a["agents"]["pitching"]["edge"],
+                "edge_offense": a["agents"]["offense"]["edge"],
+                "edge_advanced": a["agents"]["advanced"]["edge"],
+                "edge_bullpen": a["agents"]["bullpen"]["edge"],
+                "edge_weather": a["agents"]["weather"]["edge"],
+                "edge_market": ou["edge"],
+                "notes": f"Total line: {ou.get('total_line', '?')} | {a.get('lineup_status', '')}",
+                "mlb_game_id": a["mlb_game_id"],
+                "analysis": a,
+            })
+
+    # Sort by confidence (highest first) and cap volume
+    approved.sort(key=lambda x: x["confidence"], reverse=True)
+    approved = approved[:MAX_PICKS_PER_DAY]
+
+    if not approved:
+        print("[RISK] PASS — No picks meet quality thresholds today.")
+    else:
+        print(f"[RISK] Approved {len(approved)} picks (max {MAX_PICKS_PER_DAY}).")
+
+    return approved
+
+
+# ══════════════════════════════════════════════
+#  Helpers
+# ══════════════════════════════════════════════
+
+def _safe(val) -> float:
+    try:
+        return float(val) if val is not None else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+def _clamp(val: float, lo: float = -1.0, hi: float = 1.0) -> float:
+    return max(lo, min(hi, val))
+
+def _clamp_prob(val: float) -> float:
+    return max(0.01, min(0.99, val))
+
+def _edge_to_confidence(edge_score: float) -> int:
+    """Convert edge score to 1-10 confidence."""
+    if edge_score >= 0.40:
+        return 10
+    elif edge_score >= 0.35:
+        return 9
+    elif edge_score >= 0.28:
+        return 8
+    elif edge_score >= 0.20:
+        return 7
+    elif edge_score >= 0.15:
+        return 6
+    elif edge_score >= 0.10:
+        return 5
+    elif edge_score >= 0.06:
+        return 4
+    elif edge_score >= 0.03:
+        return 3
+    else:
+        return 2
