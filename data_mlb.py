@@ -183,7 +183,7 @@ def fetch_pitcher_stats(pitcher_mlb_id: int, season: int = None) -> dict:
 # MLB Stats API — Pitcher Rest (days since last start)
 # ──────────────────────────────────────────────
 
-def fetch_pitcher_rest(pitcher_id: int):
+def fetch_pitcher_rest(pitcher_id: int, season: int = None):
     """
     Returns the number of days since a pitcher's last start.
     Uses the game log endpoint — only counts games started, not relief appearances.
@@ -192,9 +192,10 @@ def fetch_pitcher_rest(pitcher_id: int):
     if not pitcher_id:
         return None
 
+    _season = season or SEASON_YEAR
     url = (
         f"{MLB_BASE}/people/{pitcher_id}/stats"
-        f"?stats=gameLog&group=pitching&season={SEASON_YEAR}&limit=10"
+        f"?stats=gameLog&group=pitching&season={_season}&limit=10"
     )
     try:
         resp = requests.get(url, timeout=10)

@@ -1,21 +1,17 @@
 """Tests for backtest_cache.py — SQLite cache layer."""
 import os
+import sys
 import sqlite3
 import tempfile
 import pytest
+from unittest.mock import patch, MagicMock
 
-# The cache module will be importable once backtest_cache.py exists.
-# These tests import it directly.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
 def test_placeholder():
     """Placeholder so pytest can discover this file before backtest_cache exists."""
     assert True
-
-
-from unittest.mock import patch, MagicMock
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 
 def test_fetch_pitcher_stats_uses_season_param():
@@ -36,3 +32,33 @@ def test_fetch_pitcher_stats_uses_season_param():
 
     assert '2024' in captured_url['url'], f"Expected 2024 in URL, got: {captured_url['url']}"
     assert result.get('era') == 3.50
+
+
+def test_fetch_statcast_team_batting_uses_season_cache_key():
+    """fetch_statcast_team_batting(season=2024) should cache under sc_bat_2024, not today's date."""
+    import data_mlb
+    # Clear module-level cache
+    data_mlb._statcast_cache.clear()
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    # Return minimal CSV-like content
+    import io
+    mock_resp.content = b"player_name,xwoba,woba,wobadiff,hardhit_percent,barrels_per_bbe_percent,launch_speed\nNYY,0.320,0.315,-0.005,45.2,8.1,89.3\n"
+
+    with patch('requests.get', return_value=mock_resp) as mock_get:
+        data_mlb.fetch_statcast_team_batting(season=2024)
+        first_call_count = mock_get.call_count
+
+        # Second call with same season should hit cache, not make another request
+        data_mlb.fetch_statcast_team_batting(season=2024)
+        assert mock_get.call_count == first_call_count, "Second call should use cache, not re-fetch"
+
+    # Verify cache key is season-based, not date-based
+    from datetime import date
+    today = date.today().isoformat()
+    assert f"sc_bat_{today}" not in data_mlb._statcast_cache
+    assert "sc_bat_2024" in data_mlb._statcast_cache
+
+    # Clean up
+    data_mlb._statcast_cache.clear()
