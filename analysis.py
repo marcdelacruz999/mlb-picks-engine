@@ -180,8 +180,14 @@ def score_offense(game: dict) -> dict:
 
 def score_bullpen(game: dict) -> dict:
     """
-    BULLPEN AGENT — Compare team bullpen strength.
-    Factors: team pitching ERA, WHIP, K/9 (as bullpen proxy).
+    BULLPEN AGENT — Compare team bullpen strength with fatigue adjustment.
+    Factors: season ERA, WHIP, K/9, save%, plus recent workload (last 3 days IP).
+
+    Fatigue thresholds (ip_last_3):
+      ≤ 8.0  → no penalty
+      8–12   → -0.08 (moderate)
+      > 12   → -0.15 (heavy)
+    Positive score = home edge; negative = away edge.
     """
     home_bp = game.get("home_pitching", {})
     away_bp = game.get("away_pitching", {})
@@ -193,7 +199,6 @@ def score_bullpen(game: dict) -> dict:
     whip_diff = _safe(away_bp.get("whip")) - _safe(home_bp.get("whip"))
     k9_diff = _safe(home_bp.get("k_per_9")) - _safe(away_bp.get("k_per_9"))
 
-    # Factor in save reliability
     home_sv = _safe(home_bp.get("saves"))
     home_svo = max(_safe(home_bp.get("save_opportunities")), 1)
     away_sv = _safe(away_bp.get("saves"))
@@ -206,8 +211,34 @@ def score_bullpen(game: dict) -> dict:
         k9_diff * 0.03 +
         save_pct_diff * 0.5
     )
+    score = raw / 2.0
 
-    score = _clamp(raw / 2.0)
+    # Fatigue adjustment
+    home_usage = game.get("home_bullpen_usage", {})
+    away_usage = game.get("away_bullpen_usage", {})
+
+    def _fatigue_penalty(usage: dict) -> float:
+        ip3 = usage.get("ip_last_3", 0.0) if usage else 0.0
+        if ip3 > 12.0:
+            return 0.15
+        elif ip3 > 8.0:
+            return 0.08
+        return 0.0
+
+    home_penalty = _fatigue_penalty(home_usage)
+    away_penalty = _fatigue_penalty(away_usage)
+    score += away_penalty - home_penalty
+
+    score = _clamp(score)
+
+    # Build edge description
+    fatigue_notes = []
+    if home_penalty > 0:
+        level = "heavily" if home_penalty >= 0.15 else "moderately"
+        fatigue_notes.append(f"home pen {level} fatigued ({home_usage.get('ip_last_3', 0):.1f} IP/3d)")
+    if away_penalty > 0:
+        level = "heavily" if away_penalty >= 0.15 else "moderately"
+        fatigue_notes.append(f"away pen {level} fatigued ({away_usage.get('ip_last_3', 0):.1f} IP/3d)")
 
     if score > 0.15:
         edge = "Home bullpen is stronger"
@@ -216,12 +247,17 @@ def score_bullpen(game: dict) -> dict:
     else:
         edge = "Bullpens are comparable"
 
+    if fatigue_notes:
+        edge += f" — {', '.join(fatigue_notes)}"
+
     return {
         "score": round(score, 3),
         "edge": edge,
         "detail": {
             "home_bp_era": home_bp.get("era"),
             "away_bp_era": away_bp.get("era"),
+            "home_bp_ip_last_3": home_usage.get("ip_last_3", 0.0),
+            "away_bp_ip_last_3": away_usage.get("ip_last_3", 0.0),
         }
     }
 

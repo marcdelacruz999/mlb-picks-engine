@@ -190,3 +190,82 @@ def test_fetch_bullpen_recent_usage_3day_vs_5day_boundary():
     assert result["ip_last_5"] == pytest.approx(7.0)   # both games: 3.0 + 4.0
     assert result["games_last_3"] == 1
     assert result["games_last_5"] == 2
+
+
+def _make_bullpen_game(home_era=4.00, away_era=4.00,
+                       home_whip=1.30, away_whip=1.30,
+                       home_k9=8.5, away_k9=8.5,
+                       home_sv=20, home_svo=25,
+                       away_sv=20, away_svo=25,
+                       home_usage=None, away_usage=None):
+    """Helper: build a game dict for score_bullpen tests."""
+    return {
+        "home_pitching": {
+            "era": home_era, "whip": home_whip, "k_per_9": home_k9,
+            "saves": home_sv, "save_opportunities": home_svo,
+        },
+        "away_pitching": {
+            "era": away_era, "whip": away_whip, "k_per_9": away_k9,
+            "saves": away_sv, "save_opportunities": away_svo,
+        },
+        "home_bullpen_usage": home_usage or {},
+        "away_bullpen_usage": away_usage or {},
+    }
+
+
+def test_score_bullpen_no_fatigue_unaffected():
+    """Equal bullpens, no fatigue → score near 0."""
+    import analysis
+    game = _make_bullpen_game()
+    result = analysis.score_bullpen(game)
+    assert abs(result["score"]) < 0.05
+
+
+def test_score_bullpen_home_fatigue_reduces_home_edge():
+    """Home bullpen heavily fatigued (ip_last_3 > 12) → score shifts negative."""
+    import analysis
+    game = _make_bullpen_game(
+        home_era=3.80, away_era=4.20,  # home slightly better on paper
+        home_usage={"ip_last_3": 14.0, "ip_last_5": 18.0},
+        away_usage={},
+    )
+    result = analysis.score_bullpen(game)
+    # Heavy fatigue penalty (-0.15) should push score below 0.05
+    assert result["score"] < 0.05
+
+
+def test_score_bullpen_away_fatigue_benefits_home():
+    """Away bullpen heavily fatigued → score shifts positive (home advantage)."""
+    import analysis
+    game = _make_bullpen_game(
+        away_usage={"ip_last_3": 13.0, "ip_last_5": 17.0},
+        home_usage={},
+    )
+    result = analysis.score_bullpen(game)
+    assert result["score"] > 0.05
+
+
+def test_score_bullpen_moderate_fatigue():
+    """Moderate fatigue (ip_last_3 between 8 and 12) → smaller penalty (-0.08)."""
+    import analysis
+    game = _make_bullpen_game(
+        away_usage={"ip_last_3": 10.0, "ip_last_5": 14.0},
+        home_usage={},
+    )
+    result = analysis.score_bullpen(game)
+    # Moderate fatigue (+0.08) on equal bullpens — should be positive but not huge
+    assert 0.02 < result["score"] < 0.15
+
+
+def test_score_bullpen_fatigue_detail_included():
+    """Fatigue IP values appear in detail dict."""
+    import analysis
+    game = _make_bullpen_game(
+        home_usage={"ip_last_3": 13.0, "ip_last_5": 17.0},
+        away_usage={"ip_last_3": 2.0, "ip_last_5": 4.0},
+    )
+    result = analysis.score_bullpen(game)
+    assert "home_bp_ip_last_3" in result["detail"]
+    assert "away_bp_ip_last_3" in result["detail"]
+    assert result["detail"]["home_bp_ip_last_3"] == 13.0
+    assert result["detail"]["away_bp_ip_last_3"] == 2.0
