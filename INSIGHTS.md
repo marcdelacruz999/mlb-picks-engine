@@ -99,6 +99,11 @@ Action: [watch / adjust weight / add hardcoded correction]
 
 ### Pitching Agent
 - Rest days logic added 2026-04-10 — monitor if short-rest picks underperform
+- Backtest (2024+2025): lift +0.080 — strongest signal of 4 testable agents, but overweighted at 30%
+
+### Bullpen Agent
+- Backtest (2024+2025): lift +0.050 — rivaled offense despite only 10% weight; raised to 17% on 2026-04-10
+- Fatigue signal added 2026-04-10: heavy use (>12 IP/3d) = −0.15 penalty; moderate (>8 IP/3d) = −0.08; fires automatically each run
 
 ### Advanced (Statcast) Agent
 - xwOBA luck diff most reliable signal; barrel rate adjustments smaller magnitude
@@ -127,7 +132,8 @@ Log API issues, missing data, or anomalies here.
 - Statcast data thin in April (small sample size for team stats early season)
 - FanGraphs scraping non-functional — wRC+ not available
 - Home/away pitcher splits not fetched — model uses season ERA only
-- Bullpen fatigue (last 3-7 days usage) not yet implemented
+- Rolling 7/14/30-day team trends not implemented — season stats only
+- Line movement tracking not stored
 
 ---
 
@@ -138,6 +144,112 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 | Date | Change | Reason | Result |
 |------|--------|--------|--------|
 | 2026-04-10 | Initial weights set | Baseline — pitching 30%, offense 20%, advanced 15%, market 10%, bullpen 10%, momentum 10%, weather 5% | TBD |
+| 2026-04-10 | Bullpen +7pp (10→17%), Pitching −5pp (30→25%), Advanced −2pp (15→13%) | 2024+2025 backtest (4,855 games). Bullpen lift +0.050 rivaled offense; pitching lift +0.080 was highest but not dominant enough to justify 30%. Advanced lift near zero (likely end-of-season stats approximation, not true signal gap — small trim only). Momentum/weather held constant — all-neutral historical placeholders make them untestable. Model underconfident: actual win rates beat predictions by 5-14pp across all calibration buckets. | TBD — revisit after 30-50 live picks |
+
+## Infrastructure Notes
+
+- Scheduler migrated from cron to launchd on 2026-04-11 (macOS TCC blocked cron from accessing ~/Projects/)
+- Project moved from ~/Documents/Claude/ to ~/Projects/Claude/ to avoid TCC-protected Documents folder
+- Plists: ~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist | Wrapper: run.sh
+
+## Bug Log
+
+| Date | Bug | Fix |
+|------|-----|-----|
+| 2026-04-11 | `--refresh` compared O/U pick confidence against ML confidence → false "reduce confidence" alerts for all O/U picks | Fixed: look up O/U confidence from `refreshed["ou_pick"]` when pick_type is over/under |
+| 2026-04-11 | `--refresh` `still_approved` checked only by game id, not pick type → O/U picks could be wrongly cancelled if ML dropped | Fixed: track `approved_by_type = {(mlb_game_id, pick_type)}` |
+| 2026-04-11 | `save_pick` had no dedup — each engine run inserted duplicate picks | Fixed: `pick_already_sent_today()` check before insert; dry run skips DB entirely |
+| 2026-04-11 | `run_results()` sent 0-0-0 Discord recap when no picks existed (missing `return` after "Nothing to grade") or when all picks were already graded | Fixed: early `return` after empty picks check; guard against `total == 0 and pushes == 0` before `send_results()` |
+
+---
+
+## System Snapshot — 2026-04-11 (updated session 2)
+
+### What's been built
+- 7-agent weighted scoring engine with Discord alerts
+- Backtester (`backtest.py`) — 2024+2025 historical validation, 4,855 games
+- Bullpen fatigue signal — last 5 days of boxscores, heavy/moderate thresholds
+- `--game` flag (`engine.py --game X`) — full 7-agent analysis on any game matching team name X, sent directly to Discord; bypasses confidence threshold and approved picks flow; supports partial name match and multi-token queries
+- Game time in Discord alerts — `game_time_utc` from MLB API (`g["gameDate"]`), displayed as PT (`America/Los_Angeles`) via `discord_bot._format_game_time()`
+- `analysis_log` table — all 15 games logged daily with ML + O/U predictions; updated on every `--refresh` run so evening games get confirmed lineup data before 11pm grading; `UNIQUE(game_date, mlb_game_id)` prevents duplicates
+- `--status` shows two accuracy views: **PICKS SENT** (only approved picks) and **MODEL ML / MODEL O/U** (all 15 games — measures raw model signal independent of pick filter)
+- **EV gate** — `_calculate_ev()` in analysis.py; `MIN_EV = -0.02` in config.py; rejects picks at clearly bad odds; ev_score in DB + Discord alerts
+- **Pitcher scratch monitor** — `monitor.py` + `monitor.sh`; polls MLB API; Discord alert per side (away/home) per game; `scratch_alerts` table with UNIQUE(game_date, mlb_game_id, side)
+- **Lineup strength scoring** — `fetch_lineup_batting(player_ids)` batch API in data_mlb.py; offense agent adjusts score when confirmed lineups OPS differs from team season OPS; session-level cache
+- **Weather at game start time** — `fetch_venue_weather()` uses `game_time_utc` + `zoneinfo` to select correct forecast hour; falls back to 7pm
+- **Travel fatigue** — `fetch_travel_context()` in data_mlb.py; away penalty: road_games≥5 → +0.04, tz_changes≥2 → +0.05, cap 0.08; in momentum agent
+- **ROI tracking** — `ml_odds`/`ou_odds` stored in picks table at send time; `get_roi_summary()` calculates true unit P&L; `--status` shows net units
+
+### Backtest findings (2024+2025, 4,855 games)
+| Metric | Value |
+|--------|-------|
+| Overall win rate | 58.9% |
+| Conf 8 win rate | 85.2% (46/54) |
+| Conf 7 win rate | 72.3% (188/260) |
+| Calibration bias | Model underconfident by 5-14pp across all buckets |
+| Pitching lift | +0.080 (strongest) |
+| Bullpen lift | +0.050 |
+| Offense lift | +0.041 |
+| Advanced lift | −0.009 (near zero — likely stats-approximation artifact) |
+| Momentum lift | N/A — all-neutral in backtest (no point-in-time streak data) |
+| Weather lift | N/A — all-neutral in backtest (no historical weather) |
+
+### Current weights
+| Agent | Weight |
+|-------|--------|
+| Pitching | 25% |
+| Offense | 20% |
+| Bullpen | 17% |
+| Advanced | 13% |
+| Momentum | 10% |
+| Market | 10% |
+| Weather | 5% |
+
+### Next review trigger
+Weekly optimizer runs every Sunday at 9pm — fully autonomous. See COMPLETED_IMPROVEMENTS.md for what has been implemented.
+
+---
+
+## Improvement Roadmap — 2026-04-11
+
+Ranked by estimated impact on pick quality. Items marked ✅ are in the weekly optimizer queue.
+Items marked 🔲 are not yet scheduled.
+
+### Tier 1 — Highest impact on win rate
+
+| # | Improvement | Status | Notes |
+|---|-------------|--------|-------|
+| 1 | **Expected Value (EV) gate** | ✅ Done 2026-04-11 | MIN_EV=-0.02 in config.py; O/U uses confidence-based win prob |
+| 2 | **Pitcher scratch / lineup change detection** | ✅ Done 2026-04-11 | monitor.py; needs launchd plist still |
+| 3 | **Lineup strength scoring** | ✅ Done 2026-04-11 | Batch MLB people API; session cache |
+
+### Tier 2 — Solid signal improvements
+
+| # | Improvement | Status | Notes |
+|---|-------------|--------|-------|
+| 4 | **Weather at game-specific start time** | ✅ Done 2026-04-11 | zoneinfo; falls back to 7pm |
+| 5 | **Travel fatigue signal** | ✅ Done 2026-04-11 | Away only; road_games + tz_changes; cap 0.08 |
+| 6 | **Actual odds stored for ROI tracking** | ✅ Done 2026-04-11 | ml_odds/ou_odds in picks; net_units in --status |
+
+### Tier 3 — Structural improvements
+
+| # | Improvement | Status | Notes |
+|---|-------------|--------|-------|
+| 7 | **Backtest point-in-time stats** | 🔲 | April games analyzed with October stats — inflates accuracy |
+| 8 | **Kelly criterion pick sizing** | 🔲 | Half-Kelly in Discord alerts; improves capital allocation |
+| 9 | **Correlated pick cap** | 🔲 | Max 2 overs/unders/same-division per day |
+
+### In optimizer queue (weekly auto-implementation)
+✅ Umpire tendencies expansion (43 umps) — done 2026-04-11
+✅ EV gate — done 2026-04-11
+✅ Pitcher scratch monitor — done 2026-04-11
+✅ ROI tracking — done 2026-04-11
+✅ Weather timing — done 2026-04-11
+🔲 Rolling 7-day team trends (momentum agent)
+🔲 Home/away pitcher ERA splits (pitching agent)
+🔲 Travel fatigue — done 2026-04-11
+🔲 Opening line movement tracking (market agent)
+🔲 API error handling & retry logic (data quality)
 
 ---
 

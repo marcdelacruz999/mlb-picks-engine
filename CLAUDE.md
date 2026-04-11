@@ -1,24 +1,26 @@
 # MLB Picks Engine — Claude Code Reference
 
 ## Project Location
-`/Users/marc/Documents/Claude/Projects/Shenron/mlb-picks-engine/`
+`/Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/`
 
 ## What This Is
 A fully automated MLB betting picks engine. It collects live game data, runs a 7-agent weighted analysis, filters for high-confidence plays only, and sends formatted alerts to a private Discord channel via webhook. No manual intervention needed day-to-day.
 
 ---
 
-## Daily Automated Schedule (cron)
+## Daily Automated Schedule (launchd)
 
 | Time | Command | What it does |
 |------|---------|--------------|
-| 9:00 AM | `engine.py` | Full analysis — sends approved picks to Discord (catches 10am games) |
+| 8:00 AM | `engine.py` | Full analysis — sends approved picks to Discord (catches 10am games) |
 | 11:00 AM | `engine.py --refresh` | Re-validates picks, sends cancel/reduce alerts if edge changed |
 | 1:00 PM | `engine.py --refresh` | Same |
 | 3:00 PM | `engine.py --refresh` | Same |
 | 5:00 PM | `engine.py --refresh` | Same |
 | 11:00 PM | `engine.py --results` | Grades picks vs final scores, sends recap to Discord |
+| Sunday 9pm | `optimizer.py` | Weekly autonomous improvement — analyzes performance, implements one change, sends Discord report |
 
+Plists at `~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist`. Wrappers: `run.sh` (daily), `run_optimizer.sh` (weekly).
 All output logged to `engine.log`.
 
 ---
@@ -30,7 +32,11 @@ python3 engine.py              # Full analysis + send picks to Discord
 python3 engine.py --test       # Dry run: analyze only, no Discord
 python3 engine.py --refresh    # Re-validate sent picks, send updates if changed
 python3 engine.py --results    # Grade today's picks after games finish
+                               # Guards: no-ops if no picks sent today, no final games, or nothing newly graded
 python3 engine.py --status     # Print 30-day tracking snapshot
+python3 engine.py --game X     # Full 7-agent analysis of game(s) matching team name X, sent to Discord
+                               # Bypasses confidence threshold — analysis only, no approved picks flow
+                               # Examples: --game marlins | --game "marlins tigers" | --game yankees
 ```
 
 ---
@@ -41,12 +47,12 @@ Each agent scores from -1.0 (away edge) to +1.0 (home edge).
 
 | Agent | Weight | Data Source |
 |-------|--------|-------------|
-| Pitching | 30% | MLB Stats API — ERA, WHIP, K/BB, K/9, handedness matchup, pitcher rest days |
+| Pitching | 25% | MLB Stats API — ERA, WHIP, K/BB, K/9, handedness matchup, pitcher rest days |
 | Offense | 20% | MLB Stats API — OPS, OBP, SLG, runs per game |
-| Advanced Metrics | 15% | Baseball Savant Statcast — xwOBA luck diff, barrel rate, hard-hit rate, pitcher xERA regression |
-| Market Value | 10% | The Odds API — model prob vs implied prob edge |
-| Bullpen | 10% | MLB Stats API — team ERA, WHIP, save %, holds |
+| Bullpen | 17% | MLB Stats API — team ERA, WHIP, save %, holds + recent usage fatigue signal |
+| Advanced Metrics | 13% | Baseball Savant Statcast — xwOBA luck diff, barrel rate, hard-hit rate, pitcher xERA regression |
 | Momentum | 10% | MLB Stats API — win streaks, win %, last 10 |
+| Market Value | 10% | The Odds API — model prob vs implied prob edge |
 | Weather/Environment | 5% | Open-Meteo + park factors + HP umpire tendencies |
 
 ### Statcast Logic (Advanced Agent)
@@ -68,6 +74,15 @@ Each agent scores from -1.0 (away edge) to +1.0 (home edge).
 - 5-6 days rest (extra rest): ±0.05 bonus
 - ≥8 days rest (extended layoff): ±0.03 rust penalty
 - Data: MLB Stats API game log endpoint per pitcher, fetched per game
+
+### Bullpen Fatigue Logic
+- `fetch_bullpen_recent_usage(team_id)` — fetches last 5 days of completed boxscores, sums relief IP (all pitchers after starter)
+- `_bullpen_fatigue_penalty(usage)` in `analysis.py` — applies penalty based on `ip_last_3`:
+  - ≤ 8.0 IP → no penalty
+  - 8–12 IP → −0.08 (moderate fatigue)
+  - > 12 IP → −0.15 (heavy fatigue)
+- Score adjustment: `score += away_penalty - home_penalty` (fatigued team loses edge)
+- Fatigue note included in Discord edge summary when triggered
 
 ### Weather/Environment Logic (5% weight agent covers all three)
 **Weather:**
@@ -125,6 +140,9 @@ Each agent scores from -1.0 (away edge) to +1.0 (home edge).
 | Pick update (cancel/reduce) | `⚠️ MLB PICK UPDATE` |
 | Evening results recap | `✅ MLB DAILY RESULTS` |
 
+Each pick alert includes a **Date/Time** line (game start in PT, `America/Los_Angeles`).
+Source: `g["gameDate"]` (UTC ISO) from MLB API → `game_time_utc` field → `discord_bot._format_game_time()`.
+
 Update alerts fire automatically during `--refresh` runs when:
 - A pick drops below threshold → **Cancel** alert
 - Confidence drops 2+ points → **Reduce Confidence** alert
@@ -141,19 +159,28 @@ Each pick alert includes:
 
 ```
 mlb-picks-engine/
-├── engine.py       — Main orchestrator (run this)
-├── analysis.py     — 7-agent weighted scoring + risk filter + watchlist
-├── data_mlb.py     — MLB Stats API (schedule, pitchers, batting, records, officials,
-│                     lineups, pitcher rest); Baseball Savant Statcast; Open-Meteo weather
-├── data_odds.py    — The Odds API (moneyline, run line, totals; pre-game filter; consensus)
-├── discord_bot.py  — Webhook sender (pick, update, results); formats edge summary + odds block
-├── database.py     — SQLite tracking (picks, games, results, ROI)
-├── config.py       — API keys, weights, thresholds, PARK_FACTORS, UMPIRE_TENDENCIES
-├── mlb_picks.db    — Auto-created SQLite database
-├── engine.log      — Cron output log
-├── SETUP.md        — First-time setup instructions
-├── INSIGHTS.md     — Daily outcomes, calibration tracker, bias log, weight tuning history
-└── CLAUDE.md       — This file
+├── engine.py               — Main orchestrator (run this)
+├── optimizer.py            — Weekly autonomous improvement engine (Sunday 9pm)
+├── analysis.py             — 7-agent weighted scoring + _bullpen_fatigue_penalty() + risk filter + watchlist
+├── data_mlb.py             — MLB Stats API (schedule, pitchers, batting, records, officials,
+│                             lineups, pitcher rest, bullpen recent usage); Statcast; Open-Meteo weather
+├── data_odds.py            — The Odds API (moneyline, run line, totals; pre-game filter; consensus)
+├── discord_bot.py          — Webhook sender (pick, update, results); formats edge summary + odds block
+├── database.py             — SQLite tracking (picks, games, results, ROI)
+├── config.py               — API keys, weights, thresholds, PARK_FACTORS, UMPIRE_TENDENCIES
+├── backtest.py             — Historical backtester (python3 backtest.py to run 2024+2025 seasons)
+├── backtest_cache.py       — SQLite cache for backtest historical data (backtest_cache.db)
+├── monitor.py              — Pitcher scratch monitor; run separately every 30 min (no launchd plist yet)
+├── monitor.sh              — Wrapper for monitor.py
+├── run.sh                  — Wrapper for daily engine runs (launchd)
+├── run_optimizer.sh        — Wrapper for weekly optimizer (launchd, full PATH for claude CLI)
+├── mlb_picks.db            — Auto-created SQLite database
+├── backtest_cache.db       — Auto-created backtest cache
+├── engine.log              — All run output
+├── COMPLETED_IMPROVEMENTS.md — Tracks every optimizer-implemented improvement
+├── SETUP.md                — First-time setup instructions
+├── INSIGHTS.md             — Daily outcomes, calibration tracker, bias log, weight tuning history
+└── CLAUDE.md               — This file
 ```
 
 ---
@@ -168,9 +195,11 @@ MIN_CONFIDENCE = 7
 MIN_EDGE_SCORE = 0.12
 SEASON_YEAR = 2026
 WEIGHTS = {
-    "pitching": 0.30, "offense": 0.20, "bullpen": 0.10,
-    "advanced": 0.15, "momentum": 0.10, "weather": 0.05, "market": 0.10
+    "pitching": 0.25, "offense": 0.20, "bullpen": 0.17,
+    "advanced": 0.13, "momentum": 0.10, "weather": 0.05, "market": 0.10
 }
+# Weights updated 2026-04-10 based on 2024+2025 backtest (4,855 games)
+# Bullpen raised 10→17% (strongest underweighted signal), pitching lowered 30→25%
 PARK_FACTORS = { "COL": 1.28, "CIN": 1.13, ..., "SF": 0.89 }  # 30 parks, keyed by team abbr
 UMPIRE_TENDENCIES = { "Laz Diaz": {"run_factor": -0.08, ...}, ... }  # 14 extreme umps
 ```
@@ -180,20 +209,28 @@ UMPIRE_TENDENCIES = { "Laz Diaz": {"run_factor": -0.08, ...}, ... }  # 14 extrem
 ## Database
 
 SQLite at `mlb_picks.db`. Tables:
-- `picks` — every approved pick with edge details (`edge_pitching`, `edge_offense`, `edge_advanced`, `edge_bullpen`, `edge_weather`, `edge_market`), `discord_sent` flag, outcome status
+- `picks` — approved picks sent to Discord; `discord_sent` flag; outcome status; deduped by `pick_already_sent_today(game_id, pick_type)` — one record per game+type per day
+- `analysis_log` — all 15 games logged every run; `UNIQUE(game_date, mlb_game_id)` + `INSERT OR REPLACE` so refreshes update with confirmed lineups; graded by `--results` at 11pm; powers model accuracy stats in `--status`
 - `games` — game records with final scores
 - `teams` — all 30 MLB teams with mlb_id, abbreviation, division, league
-- `players` — player records
-- `pitcher_stats` — season stats per pitcher
-- `team_batting` — season batting stats per team
-- `bullpen_stats` — season bullpen stats per team
-- `odds` — odds snapshots per game
 - `daily_results` — wins/losses/pushes/ROI per day
 
-To clear test picks (keep only Discord-sent):
-```python
-conn.execute("DELETE FROM picks WHERE created_at LIKE ? AND discord_sent=0", (f'{today}%',))
+Key DB functions:
+- `pick_already_sent_today(game_id, pick_type)` — dedup guard before insert
+- `save_analysis_log(entry)` — upsert via INSERT OR REPLACE
+- `get_today_analysis_log()` — all 15 today's entries
+- `update_analysis_log_result(log_id, ml_status, ou_status, ...)` — grade after results
+- `get_model_accuracy_summary(days)` — ML + O/U accuracy across all logged games
+
+## --status Output Format
+
 ```
+PICKS SENT:  5W - 2L - 0P  (71.4% win rate)  [7 graded]
+MODEL ML:    9W - 6L  (60.0% accuracy)  [15 games]
+MODEL O/U:   7W - 4L  (63.6% accuracy)  [11 games]
+```
+
+PICKS SENT = only approved sent picks. MODEL = all 15 games (raw pipeline signal).
 
 ---
 
@@ -206,6 +243,42 @@ conn.execute("DELETE FROM picks WHERE created_at LIKE ? AND discord_sent=0", (f'
 | Open-Meteo | Game-time weather forecast via venue lat/lon | Free |
 | The Odds API | Moneyline, run line, totals from multiple bookmakers | Free (500 req/month) |
 | Discord Webhook | Pick/update/results delivery | Free |
+
+## Weekly Optimizer (`optimizer.py`)
+
+Runs every Sunday at 9pm. Fully autonomous improvement cycle:
+1. Analyzes pick win rates, model calibration, agent signal differentials, log errors
+2. Blends live agent signals against 4,855-game backtest baseline (2024+2025)
+   - `BACKTEST_REFERENCE` dict stores known lift scores per agent (pitching +0.080, bullpen +0.050, etc.)
+   - Blend weight shifts from 100% backtest → 80% live as live picks accumulate (20→200 picks)
+   - `load_backtest_lift()` queries `backtest_cache.db.optimizer_lift_cache` if available, else uses constants
+3. Selects highest-priority improvement (data quality → weight rebalance → threshold tune → code gaps)
+4. Implements via direct Python edit (config changes) or `claude -p --dangerously-skip-permissions` (code changes)
+5. Runs `pytest` — reverts on failure
+6. Commits + sends Discord report: live vs backtest comparison per agent, what changed, test status
+7. `COMPLETED_IMPROVEMENTS.md` tracks all implemented items to prevent repeats
+
+## Python Version & Environment
+
+- Python 3.9 on this machine. No `float | None` union syntax in signatures — use `"float | None"` string annotation or `Optional[float]`.
+- `zoneinfo` is stdlib (3.9+). No pip install needed for timezone work.
+- `%-I` strftime format works on macOS despite being glibc-documented.
+
+## Config Pattern
+
+All tunable thresholds must live in `config.py` — the optimizer reads config.py to tune values. Never hardcode thresholds inline in analysis.py.
+- Current thresholds: `MIN_CONFIDENCE`, `MIN_EDGE_SCORE`, `MIN_EV`, `MAX_PICKS_PER_DAY`
+
+## Testing Notes
+
+- **Pre-existing failing test**: `tests/test_analysis_log.py::test_run_results_grades_analysis_log` — fails as of 2026-04-11, unrelated to new work. Do not attempt to fix unless explicitly tasked.
+- **Mock patch target**: When `fetch_lineup_batting` (or any function) is imported at module level in `analysis.py`, mock it as `analysis.fetch_lineup_batting`, not `data_mlb.fetch_lineup_batting`.
+- **DB migration pattern**: Use `except sqlite3.OperationalError: pass` (not bare `except Exception`) when adding columns.
+- Run tests: `python3 -m pytest tests/ -v --tb=short`
+
+## COMPLETED_IMPROVEMENTS.md
+
+Uses `<!-- id: improvement_id -->` HTML comment markers for optimizer dedup. Each entry must have this marker or the optimizer will re-implement it. File is at project root.
 
 ## Known Limitations / Future Improvements
 
