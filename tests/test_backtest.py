@@ -228,6 +228,19 @@ def test_agent_correlation_returns_dict_with_all_agents():
         assert "lift" in corr[agent]
 
 
+def test_agent_correlation_equal_scores_no_lift_inflation():
+    """When all scores are equal (e.g. weather=0.0), n_low should be > 0."""
+    import backtest
+    results = _make_results(60, 100, agent_scores={
+        "pitching": 0.0, "offense": 0.0, "bullpen": 0.0,
+        "advanced": 0.0, "momentum": 0.0, "weather": 0.0,
+    })
+    corr = backtest.agent_correlation(results)
+    for agent in ["pitching", "offense", "bullpen", "advanced", "momentum", "weather"]:
+        # With all equal scores, both halves should be populated
+        assert corr[agent]["n_low"] > 0, f"{agent}: n_low=0, degenerate split detected"
+
+
 def test_suggest_weights_sums_to_one():
     import backtest
     from config import WEIGHTS

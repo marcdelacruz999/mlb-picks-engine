@@ -327,7 +327,7 @@ def agent_correlation(results: list) -> dict:
         high_wins = high_total = low_wins = low_total = 0
         for r in results:
             score_mag = abs(r["agent_scores"].get(agent, 0.0))
-            if score_mag >= median_score:
+            if score_mag > median_score:
                 high_total += 1
                 if r["model_correct"]:
                     high_wins += 1
