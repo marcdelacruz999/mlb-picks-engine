@@ -656,6 +656,10 @@ def collect_game_data(target_date: str = None) -> list:
         g["away_pitching"] = fetch_team_pitching(g["away_team_mlb_id"])
         g["home_pitching"] = fetch_team_pitching(g["home_team_mlb_id"])
 
+        # Fetch bullpen recent usage (fatigue signal — last 7 days)
+        g["away_bullpen_usage"] = fetch_bullpen_recent_usage(g["away_team_mlb_id"])
+        g["home_bullpen_usage"] = fetch_bullpen_recent_usage(g["home_team_mlb_id"])
+
         # Fetch records / momentum
         g["away_record"] = fetch_team_record(g["away_team_mlb_id"])
         g["home_record"] = fetch_team_record(g["home_team_mlb_id"])

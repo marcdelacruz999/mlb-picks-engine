@@ -209,7 +209,6 @@ conn.execute("DELETE FROM picks WHERE created_at LIKE ? AND discord_sent=0", (f'
 
 ## Known Limitations / Future Improvements
 
-- Bullpen fatigue (recent usage last 3-7 days) not yet implemented
 - Rolling 7/14/30-day team trends not yet implemented — uses season stats only
 - Home/away pitcher splits not yet fetched — uses season ERA only
 - Line movement tracking (opening vs current) not stored
