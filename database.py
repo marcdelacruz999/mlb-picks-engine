@@ -217,7 +217,7 @@ def init_db():
     try:
         conn.execute("ALTER TABLE picks ADD COLUMN ev_score REAL")
         conn.commit()
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # column already exists
 
     conn.close()

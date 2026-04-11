@@ -5,7 +5,7 @@ Implements the weighted decision model with all 7 agents.
 Produces confidence scores, win probabilities, and pick recommendations.
 """
 
-from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV
 from data_odds import implied_probability, find_value
 
 
@@ -903,7 +903,7 @@ def _calculate_ev(win_prob_pct: float, ml_odds) -> "float | None":
       negative odds (e.g. -150): 100 / abs(odds)  → -150 → 0.667
       positive odds (e.g. +130): odds / 100        → +130 → 1.30
     """
-    if ml_odds is None:
+    if ml_odds is None or ml_odds == 0:
         return None
     win_prob = win_prob_pct / 100.0
     loss_prob = 1.0 - win_prob
@@ -920,7 +920,6 @@ def risk_filter(analyses: list) -> list:
     Returns approved picks, sorted by confidence.
     """
     approved = []
-    MIN_EV = -0.02  # allow slightly negative EV for high-confidence plays
 
     for a in analyses:
         # Moneyline pick evaluation
@@ -969,7 +968,7 @@ def risk_filter(analyses: list) -> list:
             market_detail = a["agents"]["market"]["detail"]
             ou_odds = (market_detail.get("over_price") if ou["pick"] == "over"
                        else market_detail.get("under_price"))
-            ev_ou = _calculate_ev(a["ml_win_probability"], ou_odds)
+            ev_ou = _calculate_ev(ou["confidence"] / 10 * 100, ou_odds)
 
             if ev_ou is not None and ev_ou < MIN_EV:
                 print(f"[EV GATE] O/U rejected: {ou['pick'].upper()} "
