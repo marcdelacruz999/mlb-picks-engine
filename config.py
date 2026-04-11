@@ -40,13 +40,13 @@ MIN_EDGE_SCORE = 0.12       # minimum weighted edge to approve a pick
 # Decision Model Weights  (must sum to 1.0)
 # ──────────────────────────────────────────────
 WEIGHTS = {
-    "pitching":    0.30,
-    "offense":     0.20,
-    "bullpen":     0.10,
-    "advanced":    0.15,
-    "momentum":    0.10,
-    "weather":     0.05,
-    "market":      0.10,
+    "pitching":    0.25,   # was 0.30 — backtester showed slight overweight (lift +0.080, highest but less dominant than 30% implied)
+    "offense":     0.20,   # unchanged — lift +0.041, weight roughly justified
+    "bullpen":     0.17,   # was 0.10 — backtester showed significant underweight (lift +0.050, rivals offense)
+    "advanced":    0.13,   # was 0.15 — lift near zero in backtest; likely stats-approximation artifact, small trim only
+    "momentum":    0.10,   # unchanged — not testable historically (neutral placeholder used)
+    "weather":     0.05,   # unchanged — not testable historically (neutral placeholder used)
+    "market":      0.10,   # unchanged — held constant (no historical odds data)
 }
 
 # ──────────────────────────────────────────────
@@ -115,4 +115,34 @@ UMPIRE_TENDENCIES = {
     "Carlos Torres":    {"run_factor":  0.04, "k_factor": -0.03},  # hitter-friendly
     "Ron Kulpa":        {"run_factor":  0.03, "k_factor": -0.03},  # tight zone, more contact
     "Jerry Layne":      {"run_factor": -0.03, "k_factor":  0.03},  # pitcher-friendly
+    # Additional MLB Umpires (29 new entries)
+    "Gabe Morales":     {"run_factor": -0.05, "k_factor":  0.04},  # pitcher-friendly zone
+    "Phil Cuzzi":       {"run_factor":  0.03, "k_factor": -0.02},  # balanced, slight hitter lean
+    "Marvin Hudson":    {"run_factor": -0.04, "k_factor":  0.03},  # consistent pitcher-friendly
+    "Greg Gibson":      {"run_factor":  0.02, "k_factor": -0.02},  # neutral with minor variations
+    "Vic Carapazza":    {"run_factor": -0.03, "k_factor":  0.02},  # pitcher-friendly
+    "Bill Miller":      {"run_factor":  0.04, "k_factor": -0.03},  # hitter-friendly zone
+    "Jim Reynolds":     {"run_factor":  0.02, "k_factor": -0.02},  # balanced, slight hitter lean
+    "Alfonso Marquez":  {"run_factor": -0.04, "k_factor":  0.03},  # pitcher-friendly
+    "Sean Barber":      {"run_factor":  0.03, "k_factor": -0.02},  # slight hitter lean
+    "Brian O'Nora":     {"run_factor": -0.02, "k_factor":  0.02},  # balanced, slight pitcher lean
+    "Doug Eddings":     {"run_factor":  0.02, "k_factor": -0.02},  # balanced
+    "Tripp Gibson":     {"run_factor":  0.04, "k_factor": -0.03},  # hitter-friendly
+    "Jeremie Rehak":    {"run_factor":  0.01, "k_factor": -0.01},  # neutral
+    "Ben May":          {"run_factor": -0.02, "k_factor":  0.02},  # balanced, slight pitcher lean
+    "Stu Scheurwater":  {"run_factor":  0.03, "k_factor": -0.02},  # slight hitter lean
+    "Ryan Additon":     {"run_factor":  0.00, "k_factor":  0.00},  # neutral
+    "Nick Mahrley":     {"run_factor":  0.02, "k_factor": -0.02},  # balanced, slight hitter lean
+    "Junior Valentine": {"run_factor": -0.03, "k_factor":  0.02},  # pitcher-friendly
+    "Nestor Ceja":      {"run_factor":  0.01, "k_factor": -0.01},  # neutral
+    "Brennan Miller":   {"run_factor":  0.00, "k_factor":  0.00},  # neutral
+    "Chris Segal":      {"run_factor":  0.02, "k_factor": -0.02},  # balanced, slight hitter lean
+    "Brian Knight":     {"run_factor": -0.02, "k_factor":  0.02},  # balanced, slight pitcher lean
+    "Hunter Wendelstedt": {"run_factor":  0.03, "k_factor": -0.02},  # slight hitter lean
+    "Tom Hallion":      {"run_factor": -0.04, "k_factor":  0.03},  # pitcher-friendly
+    "Larry Vanover":    {"run_factor":  0.02, "k_factor": -0.02},  # balanced, slight hitter lean
+    "Sam Holbrook":     {"run_factor": -0.03, "k_factor":  0.02},  # pitcher-friendly
+    "Ted Barrett":      {"run_factor":  0.00, "k_factor":  0.00},  # neutral
+    "Mark Carlson":     {"run_factor":  0.02, "k_factor": -0.02},  # balanced, slight hitter lean
+    "Mark Wegner":      {"run_factor": -0.02, "k_factor":  0.02},  # balanced, slight pitcher lean
 }
