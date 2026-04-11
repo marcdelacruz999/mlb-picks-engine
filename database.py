@@ -522,11 +522,12 @@ def get_roi_summary(days: int = 30) -> dict:
             total_profit -= 1.0
         # push: 0 profit
 
-    total = summary["won"] + summary["lost"]
-    summary["total"] = total
-    summary["win_rate"] = round(summary["won"] / total * 100, 1) if total > 0 else 0.0
-    summary["roi_per_unit"] = round(total_profit / picks_with_odds, 3) if picks_with_odds > 0 else None
-    summary["units_profit"] = round(total_profit, 3)
+    total_graded = summary["won"] + summary["lost"] + summary["push"]
+    win_loss_total = summary["won"] + summary["lost"]
+    summary["total"] = total_graded
+    summary["win_rate"] = round(summary["won"] / win_loss_total * 100, 1) if win_loss_total > 0 else 0.0
+    summary["roi_per_unit"] = round(total_profit / total_graded, 3) if total_graded > 0 else None
+    summary["net_units"] = round(total_profit, 3)
     return summary
 
 
