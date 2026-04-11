@@ -15,6 +15,54 @@ from config import SEASON_YEAR
 
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
 
+_player_stat_cache: dict = {}
+
+
+def fetch_lineup_batting(player_ids: list) -> list:
+    """Fetch batting stats for a list of player IDs. Cached per session.
+
+    Returns list of {"player_id": X, "ops": 0.750, "obp": 0.330, "slg": 0.420}.
+    Returns empty list on API failure.
+    """
+    if not player_ids:
+        return []
+
+    uncached = [pid for pid in player_ids if pid not in _player_stat_cache]
+
+    if uncached:
+        ids_str = ",".join(str(pid) for pid in uncached)
+        url = (
+            f"{MLB_BASE}/people?personIds={ids_str}"
+            f"&hydrate=stats(group=hitting,type=season,season={SEASON_YEAR})"
+        )
+        try:
+            resp = requests.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            for person in data.get("people", []):
+                pid = person.get("id")
+                stats_list = person.get("stats", [])
+                stat = {}
+                if stats_list:
+                    splits = stats_list[0].get("splits", [])
+                    if splits:
+                        stat = splits[0].get("stat", {})
+                _player_stat_cache[pid] = {
+                    "player_id": pid,
+                    "ops": float(stat.get("ops", 0) or 0),
+                    "obp": float(stat.get("obp", 0) or 0),
+                    "slg": float(stat.get("slg", 0) or 0),
+                }
+        except Exception:
+            return []
+
+    results = []
+    for pid in player_ids:
+        entry = _player_stat_cache.get(pid)
+        if entry:
+            results.append(entry)
+    return results
+
 
 def _parse_ip(ip_str) -> float:
     """
@@ -108,10 +156,13 @@ def fetch_todays_games(target_date: str = None) -> list:
             lineups_data = g.get("lineups", {})
             home_lineup = [p.get("fullName", "") for p in lineups_data.get("homePlayers", [])]
             away_lineup = [p.get("fullName", "") for p in lineups_data.get("awayPlayers", [])]
+            home_lineup_ids = [p.get("id") for p in lineups_data.get("homePlayers", []) if p.get("id")]
+            away_lineup_ids = [p.get("id") for p in lineups_data.get("awayPlayers", []) if p.get("id")]
 
             game_info = {
                 "mlb_game_id": g["gamePk"],
                 "game_date": target_date,
+                "game_time_utc": g.get("gameDate", ""),
                 "status": g.get("status", {}).get("detailedState", "Scheduled"),
                 "away_team_name": away.get("team", {}).get("name", "TBD"),
                 "away_team_mlb_id": away.get("team", {}).get("id"),
@@ -132,6 +183,8 @@ def fetch_todays_games(target_date: str = None) -> list:
                 "away_lineup": away_lineup,
                 "home_lineup_confirmed": bool(home_lineup),
                 "away_lineup_confirmed": bool(away_lineup),
+                "home_lineup_ids": home_lineup_ids,
+                "away_lineup_ids": away_lineup_ids,
             }
 
             # Calculate total runs if game is final

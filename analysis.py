@@ -157,6 +157,37 @@ def score_offense(game: dict) -> dict:
         rpg_diff * 0.15
     )
 
+    # Lineup strength adjustment (only when confirmed lineups available)
+    away_lineup_ids = game.get("away_lineup_ids", [])
+    home_lineup_ids = game.get("home_lineup_ids", [])
+
+    away_lineup_ops = None
+    home_lineup_ops = None
+
+    if away_lineup_ids or home_lineup_ids:
+        from data_mlb import fetch_lineup_batting
+
+        if away_lineup_ids:
+            away_stats = fetch_lineup_batting(away_lineup_ids)
+            if away_stats:
+                away_lineup_ops = sum(s["ops"] for s in away_stats) / len(away_stats)
+
+        if home_lineup_ids:
+            home_stats = fetch_lineup_batting(home_lineup_ids)
+            if home_stats:
+                home_lineup_ops = sum(s["ops"] for s in home_stats) / len(home_stats)
+
+        away_team_ops = _safe(away_b.get("ops"))
+        home_team_ops = _safe(home_b.get("ops"))
+
+        if away_lineup_ops and away_team_ops > 0:
+            diff = (away_lineup_ops - away_team_ops) / away_team_ops
+            raw -= diff * 0.5  # away advantage: negative score = away edge
+
+        if home_lineup_ops and home_team_ops > 0:
+            diff = (home_lineup_ops - home_team_ops) / home_team_ops
+            raw += diff * 0.5  # home advantage: positive score = home edge
+
     score = _clamp(raw / 1.5)
 
     if score > 0.15:
@@ -165,6 +196,9 @@ def score_offense(game: dict) -> dict:
         edge = "Away lineup has offensive advantage"
     else:
         edge = "Offenses are comparable"
+
+    if away_lineup_ops or home_lineup_ops:
+        edge += " (confirmed lineup)"
 
     return {
         "score": round(score, 3),
