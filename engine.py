@@ -349,7 +349,6 @@ def run_results():
     picks = db.get_today_picks()
     if not picks:
         print("\nNo picks were made today. Nothing to grade.")
-        return
 
     wins, losses, pushes = 0, 0, 0
     best_pick = None
@@ -443,6 +442,64 @@ def run_results():
               f"{pick['pick_team']} ({pick['pick_type']}) — {status.upper()}")
 
     conn.close()
+
+    # ── Grade analysis_log entries ──
+    log_entries = db.get_today_analysis_log()
+    log_correct = 0
+    log_incorrect = 0
+    log_ou_correct = 0
+    log_ou_incorrect = 0
+
+    for entry in log_entries:
+        if entry["ml_status"] != "pending":
+            continue
+
+        mlb_game_id = entry["mlb_game_id"]
+        result = next((fg for fg in final_games if fg["mlb_game_id"] == mlb_game_id), None)
+        if not result:
+            continue
+
+        away_score = result.get("away_score", 0) or 0
+        home_score = result.get("home_score", 0) or 0
+        total_runs = away_score + home_score
+
+        # Grade ML prediction
+        home_won = home_score > away_score
+        away_won = away_score > home_score
+        if entry["ml_pick_team"] == result.get("home_team_name"):
+            ml_status = "correct" if home_won else ("push" if not away_won else "incorrect")
+        elif entry["ml_pick_team"] == result.get("away_team_name"):
+            ml_status = "correct" if away_won else ("push" if not home_won else "incorrect")
+        else:
+            ml_status = "push"
+
+        # Grade O/U prediction
+        ou_status = "none"
+        if entry.get("ou_pick") and entry.get("ou_line"):
+            ou_line = float(entry["ou_line"])
+            if entry["ou_pick"] == "over":
+                ou_status = "correct" if total_runs > ou_line else ("push" if total_runs == ou_line else "incorrect")
+            elif entry["ou_pick"] == "under":
+                ou_status = "correct" if total_runs < ou_line else ("push" if total_runs == ou_line else "incorrect")
+
+        db.update_analysis_log_result(
+            entry["id"], ml_status=ml_status, ou_status=ou_status,
+            actual_away=away_score, actual_home=home_score, actual_total=total_runs
+        )
+
+        if ml_status == "correct":
+            log_correct += 1
+        elif ml_status == "incorrect":
+            log_incorrect += 1
+        if ou_status == "correct":
+            log_ou_correct += 1
+        elif ou_status == "incorrect":
+            log_ou_incorrect += 1
+
+    log_total = log_correct + log_incorrect
+    print(f"\n  Model Accuracy (all {len(log_entries)} games):")
+    print(f"  ML: {log_correct}W {log_incorrect}L  ({round(log_correct/log_total*100,1) if log_total else 0}%)")
+    print(f"  O/U: {log_ou_correct}W {log_ou_incorrect}L")
 
     total = wins + losses
     roi = round((wins - losses) / max(total, 1) * 100, 1)
