@@ -59,6 +59,16 @@ def test_parse_ip_invalid_returns_zero():
     assert data_mlb._parse_ip("") == 0.0
 
 
+def test_parse_ip_float_input_returned_as_decimal():
+    """Float inputs bypass string parsing — 6.2 (float) returns 6.2, not 6.667."""
+    import data_mlb
+    assert data_mlb._parse_ip(6.0) == pytest.approx(6.0)
+    assert data_mlb._parse_ip(3.0) == pytest.approx(3.0)
+    # Note: float 6.2 is NOT the same as string "6.2" — floats return as-is
+    assert data_mlb._parse_ip(6.2) == pytest.approx(6.2)
+    assert data_mlb._parse_ip("6.2") == pytest.approx(6.667, abs=0.01)
+
+
 def test_fetch_bullpen_recent_usage_sums_relief_ip():
     """Starter throws 5.0, two relievers throw 2.1 and 1.0 — bullpen IP = 3.333."""
     import data_mlb

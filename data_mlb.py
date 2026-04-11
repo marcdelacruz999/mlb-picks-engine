@@ -24,7 +24,9 @@ def _parse_ip(ip_str) -> float:
     Returns 0.0 for invalid input.
     """
     if isinstance(ip_str, (int, float)):
-        return float(ip_str)  # already decimal, return as-is
+        # Float/int inputs are treated as already-decimal innings (e.g. 6.2 → 6.2, not 6⅔).
+        # The MLB Stats API always returns strings; this branch handles defensive callers only.
+        return float(ip_str)
     try:
         s = str(ip_str).strip()
         if not s or s in ("None", ""):
@@ -337,7 +339,7 @@ def fetch_bullpen_recent_usage(team_id: int, as_of_date=None) -> dict:
     }
     """
     today = as_of_date or date.today()
-    start = today - timedelta(days=7)
+    start = today - timedelta(days=5)  # only need last 5 days; fetching 7 would waste API calls
     end = today - timedelta(days=1)
 
     url = (
@@ -363,6 +365,8 @@ def fetch_bullpen_recent_usage(team_id: int, as_of_date=None) -> dict:
             continue
         days_ago = (today - game_date).days
 
+        # Each game is processed separately — doubleheaders count as two games by design,
+        # since both games draw from the bullpen on the same day.
         for game in date_entry.get("games", []):
             if game.get("status", {}).get("abstractGameState") != "Final":
                 continue
