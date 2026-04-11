@@ -100,6 +100,11 @@ def test_score_momentum_no_travel_data_unchanged():
     assert result_with["score"] == 0.0
 
 
+def _make_game():
+    """Alias for _make_momentum_game with no travel data."""
+    return _make_momentum_game(away_travel=None)
+
+
 def test_score_momentum_extended_road_trip_penalty():
     """With consecutive_road_games=6, score shifts toward home (positive)."""
     import analysis
@@ -120,3 +125,27 @@ def test_score_momentum_extended_road_trip_penalty():
     assert result_travel["score"] == pytest.approx(0.04, abs=0.001)
     # Signal should mention road trip
     assert "road trip" in result_travel["edge"].lower()
+
+
+def test_score_momentum_timezone_changes_penalty():
+    """tz_changes >= 2 should apply +0.05 travel penalty."""
+    import analysis
+
+    game = _make_game()
+    game["away_travel"] = {"consecutive_road_games": 0, "timezone_changes_last_5d": 2, "days_since_off_day": 1}
+    result_no_travel = analysis.score_momentum(_make_game())
+    result_travel = analysis.score_momentum(game)
+    assert result_travel["score"] > result_no_travel["score"]
+    assert any("timezone" in s.lower() for s in result_travel["edge"].split(";"))
+
+
+def test_score_momentum_travel_penalty_cap():
+    """Combined road_games >= 5 + tz_changes >= 2 should not exceed 0.08 cap."""
+    import analysis
+
+    game = _make_game()
+    game["away_travel"] = {"consecutive_road_games": 7, "timezone_changes_last_5d": 3, "days_since_off_day": 0}
+    result_no_travel = analysis.score_momentum(_make_game())
+    result_travel = analysis.score_momentum(game)
+    delta = result_travel["score"] - result_no_travel["score"]
+    assert delta <= 0.08 + 1e-6  # allow float epsilon

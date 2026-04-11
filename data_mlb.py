@@ -830,7 +830,6 @@ def collect_game_data(target_date: str = None) -> list:
 
         # Fetch travel context (fatigue signal)
         g["away_travel"] = fetch_travel_context(g["away_team_mlb_id"], target_date)
-        g["home_travel"] = fetch_travel_context(g["home_team_mlb_id"], target_date)
 
         # Fetch weather
         g["weather"] = fetch_venue_weather(g.get("venue_id"), target_date, g.get("game_time_utc", ""))
