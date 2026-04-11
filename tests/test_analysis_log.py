@@ -52,3 +52,48 @@ def test_save_analysis_log(tmp_db):
     assert row["ou_pick"] == "under"
     assert row["ml_status"] == "pending"
     assert row["ou_status"] == "pending"
+
+
+def test_get_today_analysis_log(tmp_db):
+    entry = {
+        "game_date": "2026-04-11",
+        "mlb_game_id": 999002,
+        "game": "A @ B",
+        "away_team": "A", "home_team": "B",
+        "away_pitcher": "P1", "home_pitcher": "P2",
+        "composite_score": 0.05,
+        "ml_pick_team": "B",
+        "ml_win_probability": 54.0,
+        "ml_confidence": 4,
+        "ou_pick": None, "ou_line": None, "ou_confidence": None,
+    }
+    db.save_analysis_log(entry)
+    rows = db.get_today_analysis_log()
+    assert len(rows) == 1
+    assert rows[0]["mlb_game_id"] == 999002
+
+
+def test_update_analysis_log_result(tmp_db):
+    entry = {
+        "game_date": "2026-04-11",
+        "mlb_game_id": 999003,
+        "game": "C @ D",
+        "away_team": "C", "home_team": "D",
+        "away_pitcher": "P3", "home_pitcher": "P4",
+        "composite_score": 0.20,
+        "ml_pick_team": "D",
+        "ml_win_probability": 61.0,
+        "ml_confidence": 7,
+        "ou_pick": "over", "ou_line": 8.0, "ou_confidence": 8,
+    }
+    row_id = db.save_analysis_log(entry)
+    db.update_analysis_log_result(row_id, ml_status="correct", ou_status="incorrect",
+                                   actual_away=3, actual_home=5, actual_total=8)
+    conn = db.get_connection()
+    row = conn.execute("SELECT * FROM analysis_log WHERE id=?", (row_id,)).fetchone()
+    conn.close()
+    assert row["ml_status"] == "correct"
+    assert row["ou_status"] == "incorrect"
+    assert row["actual_away_score"] == 3
+    assert row["actual_home_score"] == 5
+    assert row["actual_total"] == 8

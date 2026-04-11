@@ -316,6 +316,34 @@ def save_analysis_log(entry: dict) -> int:
     return row_id
 
 
+def get_today_analysis_log() -> list:
+    """Return all analysis_log entries for today."""
+    conn = get_connection()
+    today = date.today().isoformat()
+    rows = conn.execute(
+        "SELECT * FROM analysis_log WHERE game_date=? ORDER BY ml_confidence DESC",
+        (today,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def update_analysis_log_result(log_id: int, ml_status: str, ou_status: str,
+                                actual_away: int, actual_home: int, actual_total: int):
+    """Grade an analysis_log entry with final score."""
+    conn = get_connection()
+    conn.execute("""
+        UPDATE analysis_log
+        SET ml_status=?, ou_status=?,
+            actual_away_score=?, actual_home_score=?, actual_total=?,
+            updated_at=?
+        WHERE id=?
+    """, (ml_status, ou_status, actual_away, actual_home, actual_total,
+          datetime.utcnow().isoformat(), log_id))
+    conn.commit()
+    conn.close()
+
+
 # ── Game CRUD ────────────────────────────────────────────
 
 def upsert_game(game: dict) -> int:
