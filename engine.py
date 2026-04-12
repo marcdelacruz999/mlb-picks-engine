@@ -364,6 +364,18 @@ def run_refresh():
             print(f"  👁  {w['game']} — {w['pick_team']} (conf {w['confidence']}/10)")
 
 
+def _parse_total_line(notes: str) -> float:
+    """Extract numeric total line from notes field.
+    Handles formats like:
+      'Total line: 8.5'
+      'Total line: 8.5 | Lineups confirmed'
+      'Total line: 8.5 | Lineup TBD — monitor before first pitch'
+    """
+    import re
+    match = re.search(r"Total line:\s*([\d.]+)", notes)
+    return float(match.group(1)) if match else 0.0
+
+
 def run_results():
     """
     RESULTS GRADING
@@ -445,7 +457,7 @@ def run_results():
                 status = "push"
 
         elif pick["pick_type"] == "over":
-            total_line = float(pick.get("notes", "0").replace("Total line: ", "") or 0)
+            total_line = _parse_total_line(pick.get("notes", ""))
             if total_runs > total_line:
                 status = "won"
             elif total_runs < total_line:
@@ -454,7 +466,7 @@ def run_results():
                 status = "push"
 
         elif pick["pick_type"] == "under":
-            total_line = float(pick.get("notes", "0").replace("Total line: ", "") or 0)
+            total_line = _parse_total_line(pick.get("notes", ""))
             if total_runs < total_line:
                 status = "won"
             elif total_runs > total_line:
