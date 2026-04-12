@@ -55,6 +55,42 @@ def fetch_odds() -> list:
         return []
 
 
+def fetch_f5_odds() -> list:
+    """
+    Fetch F5 (First 5 Innings) MLB odds from The Odds API.
+    Uses sport key 'baseball_mlb_h1'.
+    Returns same structure as fetch_odds() but with F5 lines.
+    """
+    if not ODDS_API_KEY:
+        print("[ODDS] No API key set — skipping F5 odds fetch.")
+        return []
+
+    url = f"{ODDS_BASE}/sports/baseball_mlb_h1/odds"
+    params = {
+        "apiKey": ODDS_API_KEY,
+        "regions": "us",
+        "markets": "h2h,totals",
+        "oddsFormat": "american",
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        remaining = resp.headers.get("x-requests-remaining", "?")
+        print(f"[ODDS] F5: Fetched {len(data)} games. API calls remaining: {remaining}")
+        return _parse_odds(data)
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            print("[ODDS] F5 market not available (baseball_mlb_h1 not found).")
+        else:
+            print(f"[ODDS] F5 HTTP error: {e}")
+        return []
+    except Exception as e:
+        print(f"[ODDS] F5 error: {e}")
+        return []
+
+
 def _parse_odds(raw_data: list) -> list:
     """Parse raw odds API response into clean dicts."""
     results = []
@@ -256,6 +292,22 @@ def match_odds_to_game(odds_list: list, home_team: str, away_team: str) -> dict:
         matches,
         key=lambda e: e.get("consensus", {}).get("total_line") or 0
     )
+
+
+def match_f5_odds_to_game(f5_odds_list: list, home_team: str, away_team: str) -> dict:
+    """
+    Find F5 odds entry matching a specific game.
+    Same logic as match_odds_to_game but for the F5 list.
+    """
+    home_lower = home_team.lower()
+    away_lower = away_team.lower()
+    for entry in f5_odds_list:
+        entry_home = entry.get("home_team", "").lower()
+        entry_away = entry.get("away_team", "").lower()
+        if (_name_match(home_lower, entry_home) and
+                _name_match(away_lower, entry_away)):
+            return entry
+    return {}
 
 
 def _name_match(name1: str, name2: str) -> bool:
