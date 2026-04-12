@@ -1096,6 +1096,35 @@ def build_watchlist(analyses: list, approved: list) -> list:
     return watchlist[:5]
 
 
+def kelly_stake(win_prob_pct: float, ml_odds) -> float:
+    """
+    Half-Kelly stake sizing. Returns stake multiplier (0.25 to 2.0).
+
+    full_kelly = (b*p - q) / b
+      b = payout per $1 staked
+      p = win probability (decimal)
+      q = 1 - p
+
+    We use half-Kelly to reduce variance.
+    Floor: 0.25x — always bet at least a quarter unit.
+    Cap: 2.0x — never bet more than double.
+    Returns 1.0 when ml_odds is None (no sizing info).
+    """
+    if not ml_odds:
+        return 1.0
+    p = win_prob_pct / 100.0
+    q = 1.0 - p
+    if ml_odds < 0:
+        b = 100.0 / abs(ml_odds)
+    else:
+        b = ml_odds / 100.0
+    if b <= 0:
+        return 1.0
+    full_kelly = (b * p - q) / b
+    half_kelly = full_kelly * 0.5
+    return round(max(0.25, min(half_kelly, 2.0)), 2)
+
+
 def _calculate_ev(win_prob_pct: float, ml_odds) -> "float | None":
     """
     Calculate Expected Value per unit staked.
@@ -1165,6 +1194,7 @@ def risk_filter(analyses: list) -> list:
                     "analysis": a,
                     "ml_odds": pick_ml_odds,
                     "ev_score": ev,
+                    "kelly_fraction": kelly_stake(a["ml_win_probability"], pick_ml_odds),
                 }
                 approved.append(pick_dict)
 
@@ -1204,6 +1234,7 @@ def risk_filter(analyses: list) -> list:
                     "analysis": a,
                     "ou_odds": ou_odds,
                     "ev_score": ev_ou,
+                    "kelly_fraction": kelly_stake(ou["confidence"] / 10 * 100, ou_odds),
                 }
                 approved.append(ou_dict)
 
@@ -1241,6 +1272,7 @@ def risk_filter(analyses: list) -> list:
                     "analysis": a,
                     "ml_odds": f5_ml_odds,
                     "ev_score": ev_f5,
+                    "kelly_fraction": kelly_stake(f5["confidence"] / 10 * 100, f5_ml_odds),
                 }
                 approved.append(f5_dict)
 

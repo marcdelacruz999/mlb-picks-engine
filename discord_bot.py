@@ -130,6 +130,9 @@ def _format_pick_message(pick: dict) -> str:
     if ev is not None:
         ev_str = f"{ev:+.3f}"
         msg += f"**Expected Value:** {ev_str} per unit\n"
+    kelly = pick.get("kelly_fraction")
+    if kelly is not None:
+        msg += f"**Stake:** {kelly:.2f}x units\n"
     msg += (
         f"**Projected Score:** {pick.get('away_team', '?')} {pick.get('projected_away_score', '?')}"
         f" - {pick.get('home_team', '?')} {pick.get('projected_home_score', '?')}\n"
