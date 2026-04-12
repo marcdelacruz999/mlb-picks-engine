@@ -232,9 +232,9 @@ Weekly optimizer runs every Sunday at 9pm — fully autonomous. See COMPLETED_IM
 
 ---
 
-## Improvement Roadmap — 2026-04-11
+## Improvement Roadmap — updated 2026-04-12
 
-Ranked by estimated impact on pick quality. Items marked ✅ are in the weekly optimizer queue.
+Ranked by estimated impact on pick quality. Items marked ✅ are done.
 Items marked 🔲 are not yet scheduled.
 
 ### Tier 1 — Highest impact on win rate
@@ -244,22 +244,29 @@ Items marked 🔲 are not yet scheduled.
 | 1 | **Expected Value (EV) gate** | ✅ Done 2026-04-11 | MIN_EV=-0.02 in config.py; O/U uses confidence-based win prob |
 | 2 | **Pitcher scratch / lineup change detection** | ✅ Done 2026-04-11 | monitor.py; launchd plist active (every 30 min) |
 | 3 | **Lineup strength scoring** | ✅ Done 2026-04-11 | Batch MLB people API; session cache |
+| 4 | **Rolling stats pipeline** | ✅ Done 2026-04-12 | pitcher_game_logs + team_game_logs; blend <5/5-9/10-19/20+ games; pitching + offense + bullpen agents |
+| 5 | **Home/away SP splits** | 🔲 | Season ERA ignores venue split — some SPs differ by 2-3 runs; MLB API has this free; biggest remaining pitching agent gap |
+| 6 | **F5 (First 5 Innings) picks** | 🔲 | Isolates SP quality, removes bullpen variance; leverages pitching signal (+0.080 lift); Odds API has F5 markets |
+| 7 | **Line movement tracking** | 🔲 | Store opening line at first fetch; compare at each --refresh; line moving against pick = sharp money disagrees; strong filter signal |
 
 ### Tier 2 — Solid signal improvements
 
 | # | Improvement | Status | Notes |
 |---|-------------|--------|-------|
-| 4 | **Weather at game-specific start time** | ✅ Done 2026-04-11 | zoneinfo; falls back to 7pm |
-| 5 | **Travel fatigue signal** | ✅ Done 2026-04-11 | Away only; road_games + tz_changes; cap 0.08 |
-| 6 | **Actual odds stored for ROI tracking** | ✅ Done 2026-04-11 | ml_odds/ou_odds in picks; net_units in --status |
+| 8 | **Weather at game-specific start time** | ✅ Done 2026-04-11 | zoneinfo; falls back to 7pm |
+| 9 | **Travel fatigue signal** | ✅ Done 2026-04-11 | Away only; road_games + tz_changes; cap 0.08 |
+| 10 | **Actual odds stored for ROI tracking** | ✅ Done 2026-04-11 | ml_odds/ou_odds in picks; net_units in --status |
+| 11 | **Bullpen recent ERA from pitcher_game_logs** | 🔲 | Data already collected; filter non-starters last 7d; surface ERA of top 3-4 relievers by usage |
+| 12 | **Pitcher velocity/stuff trends** | 🔲 | Statcast has per-game velo; velo -1-2mph over last month = regression before ERA shows it |
+| 13 | **Opponent-adjusted rolling stats** | 🔲 | Rolling ERA vs weak lineups less meaningful than vs strong; schedule-of-opponents adjustment |
 
 ### Tier 3 — Structural improvements
 
 | # | Improvement | Status | Notes |
 |---|-------------|--------|-------|
-| 7 | **Backtest point-in-time stats** | 🔲 | April games analyzed with October stats — inflates accuracy |
-| 8 | **Kelly criterion pick sizing** | 🔲 | Half-Kelly in Discord alerts; improves capital allocation |
-| 9 | **Correlated pick cap** | 🔲 | Max 2 overs/unders/same-division per day |
+| 14 | **Kelly criterion pick sizing** | 🔲 | Size bets by edge: conf 9 + EV = 1.5x, conf 7 borderline = 0.5x; improves capital allocation |
+| 15 | **Correlated pick cap** | 🔲 | Max 2 overs/unders/same-division per day |
+| 16 | **Backtest point-in-time stats** | 🔲 | April games analyzed with October stats — inflates accuracy |
 
 ### In optimizer queue (weekly auto-implementation)
 ✅ Umpire tendencies expansion (43 umps) — done 2026-04-11
@@ -267,10 +274,12 @@ Items marked 🔲 are not yet scheduled.
 ✅ Pitcher scratch monitor — done 2026-04-11
 ✅ ROI tracking — done 2026-04-11
 ✅ Weather timing — done 2026-04-11
+✅ Travel fatigue — done 2026-04-11
 ✅ Rolling stats pipeline (pitching/offense/bullpen agents) — done 2026-04-12
 🔲 Home/away pitcher ERA splits (pitching agent)
-🔲 Travel fatigue — done 2026-04-11
 🔲 Opening line movement tracking (market agent)
+🔲 F5 picks (new pick type)
+🔲 Bullpen recent ERA from game logs (data already available)
 🔲 API error handling & retry logic (data quality)
 
 ---
