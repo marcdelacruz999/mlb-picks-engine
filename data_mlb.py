@@ -911,6 +911,21 @@ def collect_game_data(target_date: str = None) -> list:
         g["away_bullpen_usage"] = fetch_bullpen_recent_usage(g["away_team_mlb_id"])
         g["home_bullpen_usage"] = fetch_bullpen_recent_usage(g["home_team_mlb_id"])
 
+        # Rolling stats (from stored game logs — improves as season progresses)
+        import database as _db
+        g["away_pitcher_rolling"] = _db.get_pitcher_rolling_stats(
+            g.get("away_pitcher_id"), days=21)
+        g["home_pitcher_rolling"] = _db.get_pitcher_rolling_stats(
+            g.get("home_pitcher_id"), days=21)
+        g["away_batting_rolling"] = _db.get_team_batting_rolling(
+            g.get("away_team_mlb_id"), days=14)
+        g["home_batting_rolling"] = _db.get_team_batting_rolling(
+            g.get("home_team_mlb_id"), days=14)
+        g["away_bullpen_rolling"] = _db.get_team_bullpen_rolling(
+            g.get("away_team_mlb_id"), days=14)
+        g["home_bullpen_rolling"] = _db.get_team_bullpen_rolling(
+            g.get("home_team_mlb_id"), days=14)
+
         # Fetch records / momentum
         g["away_record"] = fetch_team_record(g["away_team_mlb_id"])
         g["home_record"] = fetch_team_record(g["home_team_mlb_id"])
