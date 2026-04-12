@@ -798,6 +798,39 @@ def get_team_bullpen_rolling(team_id: int, days: int = 14,
     }
 
 
+def get_bullpen_top_relievers(team_id: int, days: int = 7,
+                               as_of_date: str = None) -> list:
+    """
+    Return top 3 relievers (by total IP) for a team over the last N days.
+    Each entry: {"pitcher_id", "pitcher_name", "total_ip", "era"}.
+    Returns [] if no data.
+    """
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT pitcher_id, pitcher_name,
+               SUM(innings_pitched) as total_ip,
+               SUM(earned_runs) as total_er
+        FROM pitcher_game_logs
+        WHERE team_id=? AND is_starter=0 AND game_date > ? AND innings_pitched > 0
+        GROUP BY pitcher_id, pitcher_name
+        ORDER BY total_ip DESC
+        LIMIT 3
+    """, (team_id, cutoff.isoformat())).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        ip = r["total_ip"] or 0.0
+        era = round(r["total_er"] / ip * 9, 2) if ip > 0 else 0.0
+        result.append({
+            "pitcher_id": r["pitcher_id"],
+            "pitcher_name": r["pitcher_name"],
+            "total_ip": round(ip, 1),
+            "era": era,
+        })
+    return result
+
+
 # ── Alias for backward compatibility ─────────────────────
 
 def get_db_connection():

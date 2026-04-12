@@ -1,7 +1,30 @@
 import pytest
 import sys, os
+import sqlite3
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from unittest.mock import patch
+import database as _db
+
+
+@pytest.fixture
+def fresh_db(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(_db, "DB_PATH", db_path)
+    _db.init_db()
+    return db_path
+
+
+def _insert_reliever(db_path, pitcher_id, team_id, game_date, ip, er, k):
+    conn = sqlite3.connect(db_path)
+    conn.execute("""
+        INSERT OR IGNORE INTO pitcher_game_logs
+        (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
+         innings_pitched, earned_runs, strikeouts, walks, hits, home_runs)
+        VALUES (?,?,?,?,?,0,?,?,?,0,0,0)
+    """, (pitcher_id * 100, game_date, pitcher_id, f"Reliever {pitcher_id}",
+          team_id, ip, er, k))
+    conn.commit()
+    conn.close()
 
 
 def _make_splits_response(pitcher_id, home_era, away_era, home_whip, away_whip):
@@ -86,3 +109,48 @@ def test_score_pitching_uses_away_split_for_away_sp():
     result = score_pitching(game)
     # Away SP 2.50 ERA (split) vs home SP 5.50 ERA (season) = away advantage
     assert result["score"] < 0.0, "Away SP's better road ERA should give away edge"
+
+
+def test_get_bullpen_top_relievers_returns_top_3_by_ip(fresh_db):
+    today = "2026-04-12"
+    # 4 relievers for team 10; top 3 by IP should be returned
+    _insert_reliever(fresh_db, 1, 10, "2026-04-11", ip=2.0, er=0, k=3)  # 2 IP
+    _insert_reliever(fresh_db, 2, 10, "2026-04-11", ip=1.0, er=1, k=1)  # 1 IP
+    _insert_reliever(fresh_db, 3, 10, "2026-04-11", ip=3.0, er=0, k=4)  # 3 IP
+    _insert_reliever(fresh_db, 4, 10, "2026-04-10", ip=1.5, er=2, k=2)  # 1.5 IP
+
+    result = _db.get_bullpen_top_relievers(10, days=7, as_of_date=today)
+    assert len(result) == 3
+    # Top 3 by IP: pitcher 3 (3.0), pitcher 1 (2.0), pitcher 4 (1.5)
+    total_ips = [r["total_ip"] for r in result]
+    assert total_ips[0] >= total_ips[1] >= total_ips[2]
+
+
+def test_get_bullpen_top_relievers_returns_empty_when_no_data(fresh_db):
+    result = _db.get_bullpen_top_relievers(99, days=7, as_of_date="2026-04-12")
+    assert result == []
+
+
+def test_score_bullpen_includes_key_reliever_info(fresh_db, monkeypatch):
+    """score_bullpen edge should include key reliever ERA when data exists."""
+    import analysis
+    from datetime import date, timedelta
+
+    # Insert a reliever for team 10
+    _insert_reliever(fresh_db, 11, 10, (date.today() - timedelta(days=2)).isoformat(),
+                     ip=2.0, er=1, k=3)
+
+    game = {
+        "home_pitching": {"era": 4.0, "whip": 1.3, "k_per_9": 8.0,
+                          "saves": 3, "save_opportunities": 4, "holds": 2, "blown_saves": 1},
+        "away_pitching": {"era": 4.0, "whip": 1.3, "k_per_9": 8.0,
+                          "saves": 3, "save_opportunities": 4, "holds": 2, "blown_saves": 1},
+        "home_bullpen_rolling": None,
+        "away_bullpen_rolling": None,
+        "home_bullpen_usage": {"ip_last_3": 0.0, "ip_last_5": 0.0},
+        "away_bullpen_usage": {"ip_last_3": 0.0, "ip_last_5": 0.0},
+        "home_team_mlb_id": 10,
+        "away_team_mlb_id": 99,  # no data for away
+    }
+    result = analysis.score_bullpen(game)
+    assert "Home top pen" in result["edge"]

@@ -8,6 +8,7 @@ Produces confidence scores, win probabilities, and pick recommendations.
 from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV
 from data_odds import implied_probability, find_value
 from data_mlb import fetch_lineup_batting
+import database as _analysis_db
 
 
 # ══════════════════════════════════════════════
@@ -352,6 +353,27 @@ def score_bullpen(game: dict) -> dict:
 
     if fatigue_notes:
         edge += f" — {', '.join(fatigue_notes)}"
+
+    # ── Key reliever ERA ──
+    home_key_rel = _analysis_db.get_bullpen_top_relievers(
+        game.get("home_team_mlb_id"), days=7)
+    away_key_rel = _analysis_db.get_bullpen_top_relievers(
+        game.get("away_team_mlb_id"), days=7)
+
+    key_rel_notes = []
+    if home_key_rel:
+        names = ", ".join(r["pitcher_name"].split()[-1] for r in home_key_rel)
+        era = round(sum(r["era"] * r["total_ip"] for r in home_key_rel) /
+                    max(sum(r["total_ip"] for r in home_key_rel), 0.1), 2)
+        key_rel_notes.append(f"Home top pen (7d): {names} — {era:.2f} ERA")
+    if away_key_rel:
+        names = ", ".join(r["pitcher_name"].split()[-1] for r in away_key_rel)
+        era = round(sum(r["era"] * r["total_ip"] for r in away_key_rel) /
+                    max(sum(r["total_ip"] for r in away_key_rel), 0.1), 2)
+        key_rel_notes.append(f"Away top pen (7d): {names} — {era:.2f} ERA")
+
+    if key_rel_notes:
+        edge += " | " + " | ".join(key_rel_notes)
 
     return {
         "score": round(score, 3),
