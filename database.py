@@ -263,6 +263,19 @@ def init_db():
         UNIQUE(mlb_game_id, team_id, game_date)
     );
 
+    CREATE TABLE IF NOT EXISTS opening_lines (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_date TEXT NOT NULL,
+        mlb_game_id INTEGER NOT NULL,
+        home_ml INTEGER,
+        away_ml INTEGER,
+        total_line REAL,
+        over_price INTEGER,
+        under_price INTEGER,
+        captured_at TEXT NOT NULL,
+        UNIQUE(game_date, mlb_game_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
     CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
@@ -829,6 +842,41 @@ def get_bullpen_top_relievers(team_id: int, days: int = 7,
             "era": era,
         })
     return result
+
+
+# ── Opening Lines ────────────────────────────────────────
+
+def save_opening_lines(mlb_game_id: int, game_date: str, consensus: dict) -> None:
+    """Store opening odds for a game. INSERT OR IGNORE — only first capture kept."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO opening_lines
+            (game_date, mlb_game_id, home_ml, away_ml, total_line,
+             over_price, under_price, captured_at)
+            VALUES (?,?,?,?,?,?,?,?)
+        """, (game_date, mlb_game_id,
+              consensus.get("home_ml"), consensus.get("away_ml"),
+              consensus.get("total_line"),
+              consensus.get("over_price"), consensus.get("under_price"),
+              now))
+        conn.commit()
+    except sqlite3.DatabaseError as e:
+        print(f"[DB] Error saving opening lines: {e}")
+    finally:
+        conn.close()
+
+
+def get_opening_lines(mlb_game_id: int, game_date: str) -> "dict | None":
+    """Return opening odds for a game, or None if not captured."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM opening_lines WHERE mlb_game_id=? AND game_date=?",
+        (mlb_game_id, game_date)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ── Alias for backward compatibility ─────────────────────

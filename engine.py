@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
-from data_odds import fetch_odds, match_odds_to_game
+from data_odds import fetch_odds, match_odds_to_game, implied_probability
 from analysis import analyze_game, risk_filter, build_watchlist
 from discord_bot import send_pick, send_update, send_results, export_payload, _format_game_time
 from config import DISCORD_WEBHOOK_URL
@@ -72,6 +72,13 @@ def run_analysis(dry_run: bool = False):
             g.get("home_team_name", ""),
             g.get("away_team_name", "")
         )
+        # Store opening odds for this game (INSERT OR IGNORE — only first capture kept)
+        if odds_data and odds_data.get("consensus"):
+            db.save_opening_lines(
+                g.get("mlb_game_id"),
+                date.today().isoformat(),
+                odds_data["consensus"]
+            )
         analysis = analyze_game(g, odds_data)
         analyses.append(analysis)
 
@@ -261,6 +268,13 @@ def run_refresh():
             g.get("home_team_name", ""),
             g.get("away_team_name", "")
         )
+        # Refresh opening lines capture (INSERT OR IGNORE no-ops if already saved today)
+        if odds_data and odds_data.get("consensus"):
+            db.save_opening_lines(
+                g.get("mlb_game_id"),
+                date.today().isoformat(),
+                odds_data["consensus"]
+            )
         analysis = analyze_game(g, odds_data)
         analyses.append(analysis)
 
@@ -337,6 +351,39 @@ def run_refresh():
             new_conf = refreshed["ml_confidence"]
         still_approved = (mlb_game_id, pick_type) in approved_by_type
 
+        # ── Line movement warning ──
+        opening = db.get_opening_lines(mlb_game_id, date.today().isoformat())
+        line_moved_against = False
+        line_move_desc = ""
+        if opening:
+            cur_consensus = refreshed.get("agents", {}).get("market", {}).get("detail", {})
+            if pick_type == "moneyline":
+                pick_side = "home" if conn_pick.get("pick_team") == refreshed.get("home_team") else "away"
+                if pick_side == "home" and opening.get("home_ml") and cur_consensus.get("home_ml"):
+                    open_prob = implied_probability(opening["home_ml"])
+                    cur_prob = implied_probability(cur_consensus["home_ml"])
+                    if open_prob - cur_prob >= 0.05:
+                        line_moved_against = True
+                        line_move_desc = (f"Home ML moved from {opening['home_ml']} to "
+                                         f"{cur_consensus['home_ml']} — sharp money on away")
+                elif pick_side == "away" and opening.get("away_ml") and cur_consensus.get("away_ml"):
+                    open_prob = implied_probability(opening["away_ml"])
+                    cur_prob = implied_probability(cur_consensus["away_ml"])
+                    if open_prob - cur_prob >= 0.05:
+                        line_moved_against = True
+                        line_move_desc = (f"Away ML moved from {opening['away_ml']} to "
+                                         f"{cur_consensus['away_ml']} — sharp money on home")
+            elif pick_type in ("over", "under"):
+                open_total = opening.get("total_line")
+                cur_total = cur_consensus.get("total_line")
+                if open_total and cur_total:
+                    if pick_type == "over" and cur_total >= open_total + 0.5:
+                        line_moved_against = True
+                        line_move_desc = f"Total moved from {open_total} to {cur_total} — line went against OVER"
+                    elif pick_type == "under" and cur_total <= open_total - 0.5:
+                        line_moved_against = True
+                        line_move_desc = f"Total moved from {open_total} to {cur_total} — line went against UNDER"
+
         if not still_approved:
             # Pick no longer meets threshold — cancel alert
             update = {
@@ -365,7 +412,19 @@ def run_refresh():
                 print(f"  ⚠️  Reduce alert sent: {refreshed['game']}")
                 updates_sent += 1
         else:
-            print(f"  ✅ {refreshed['game']} — unchanged (conf {new_conf}/10)")
+            if line_moved_against:
+                update = {
+                    "game": refreshed["game"],
+                    "original_pick": conn_pick.get("pick_team", "?"),
+                    "update": "Line has moved against pick — sharp money disagrees",
+                    "action": "Watch",
+                    "reason": line_move_desc,
+                }
+                send_update(update)
+                print(f"  ⚠️  Line movement alert: {refreshed['game']} — {line_move_desc}")
+                updates_sent += 1
+            else:
+                print(f"  ✅ {refreshed['game']} — unchanged (conf {new_conf}/10)")
 
     if updates_sent == 0:
         print("\nAll picks confirmed. No updates needed.")

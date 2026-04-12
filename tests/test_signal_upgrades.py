@@ -154,3 +154,39 @@ def test_score_bullpen_includes_key_reliever_info(fresh_db, monkeypatch):
     }
     result = analysis.score_bullpen(game)
     assert "Home top pen" in result["edge"]
+
+
+def test_opening_lines_table_exists(fresh_db):
+    conn = sqlite3.connect(fresh_db)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(opening_lines)")]
+    conn.close()
+    assert "mlb_game_id" in cols
+    assert "home_ml" in cols
+    assert "away_ml" in cols
+    assert "total_line" in cols
+
+
+def test_save_opening_lines_inserts_once(fresh_db):
+    consensus = {"home_ml": -130, "away_ml": 110, "total_line": 8.5,
+                 "over_price": -110, "under_price": -110}
+    _db.save_opening_lines(12345, "2026-04-12", consensus)
+    _db.save_opening_lines(12345, "2026-04-12", consensus)  # second call — no duplicate
+
+    conn = sqlite3.connect(fresh_db)
+    count = conn.execute("SELECT COUNT(*) FROM opening_lines WHERE mlb_game_id=12345").fetchone()[0]
+    conn.close()
+    assert count == 1
+
+
+def test_get_opening_lines_returns_saved_values(fresh_db):
+    consensus = {"home_ml": -140, "away_ml": 120, "total_line": 9.0,
+                 "over_price": -115, "under_price": -105}
+    _db.save_opening_lines(99999, "2026-04-12", consensus)
+    result = _db.get_opening_lines(99999, "2026-04-12")
+    assert result["home_ml"] == -140
+    assert result["total_line"] == 9.0
+
+
+def test_get_opening_lines_returns_none_when_missing(fresh_db):
+    result = _db.get_opening_lines(0, "2026-04-12")
+    assert result is None
