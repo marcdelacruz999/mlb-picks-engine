@@ -33,15 +33,31 @@ def score_pitching(game: dict) -> dict:
     away_g = away_rolling.get("games", 0)
     home_g = home_rolling.get("games", 0)
 
-    away_era  = _blend(_safe(away_p.get("era")),      away_rolling.get("era"),  away_g)
-    away_whip = _blend(_safe(away_p.get("whip")),     away_rolling.get("whip"), away_g)
-    away_k9   = _blend(_safe(away_p.get("k_per_9")),  away_rolling.get("k9"),   away_g)
-    away_bb9  = _blend(_safe(away_p.get("bb_per_9")), away_rolling.get("bb9"),  away_g)
+    # Prefer home/away split ERA if available (away SP pitching away, home SP pitching home)
+    away_splits = game.get("away_pitcher_splits") or {}
+    home_splits = game.get("home_pitcher_splits") or {}
 
-    home_era  = _blend(_safe(home_p.get("era")),      home_rolling.get("era"),  home_g)
-    home_whip = _blend(_safe(home_p.get("whip")),     home_rolling.get("whip"), home_g)
-    home_k9   = _blend(_safe(home_p.get("k_per_9")),  home_rolling.get("k9"),   home_g)
-    home_bb9  = _blend(_safe(home_p.get("bb_per_9")), home_rolling.get("bb9"),  home_g)
+    # Season ERA for blend base — use venue-specific split if available
+    away_era_season = away_splits.get("away_era") or _safe(away_p.get("era"))
+    home_era_season = home_splits.get("home_era") or _safe(home_p.get("era"))
+    away_whip_season = away_splits.get("away_whip") or _safe(away_p.get("whip"))
+    home_whip_season = home_splits.get("home_whip") or _safe(home_p.get("whip"))
+
+    # K9/BB9: use split if available, else season
+    away_k9_season = away_splits.get("away_k9") or _safe(away_p.get("k_per_9"))
+    home_k9_season = home_splits.get("home_k9") or _safe(home_p.get("k_per_9"))
+    away_bb9_season = away_splits.get("away_bb9") or _safe(away_p.get("bb_per_9"))
+    home_bb9_season = home_splits.get("home_bb9") or _safe(home_p.get("bb_per_9"))
+
+    away_era  = _blend(away_era_season,  away_rolling.get("era"),  away_g)
+    away_whip = _blend(away_whip_season, away_rolling.get("whip"), away_g)
+    away_k9   = _blend(away_k9_season,   away_rolling.get("k9"),   away_g)
+    away_bb9  = _blend(away_bb9_season,  away_rolling.get("bb9"),  away_g)
+
+    home_era  = _blend(home_era_season,  home_rolling.get("era"),  home_g)
+    home_whip = _blend(home_whip_season, home_rolling.get("whip"), home_g)
+    home_k9   = _blend(home_k9_season,   home_rolling.get("k9"),   home_g)
+    home_bb9  = _blend(home_bb9_season,  home_rolling.get("bb9"),  home_g)
 
     era_diff  = away_era  - home_era
     whip_diff = away_whip - home_whip
@@ -128,8 +144,14 @@ def score_pitching(game: dict) -> dict:
     if rest_notes:
         edge += f" | {rest_notes[0]}"
 
+    # Note when splits or rolling are active
+    notes_parts = []
+    if away_splits.get("away_era") or home_splits.get("home_era"):
+        notes_parts.append("venue splits")
     if away_g >= 5 or home_g >= 5:
-        edge += f" [rolling: {away_g}gs away, {home_g}gs home]"
+        notes_parts.append(f"rolling: {away_g}gs away, {home_g}gs home")
+    if notes_parts:
+        edge += f" [{', '.join(notes_parts)}]"
 
     return {
         "score": round(score, 3),

@@ -16,6 +16,7 @@ from config import SEASON_YEAR
 MLB_BASE = "https://statsapi.mlb.com/api/v1"
 
 _player_stat_cache: dict = {}
+_pitcher_split_cache: dict = {}
 
 
 def fetch_lineup_batting(player_ids: list) -> list:
@@ -342,6 +343,54 @@ def fetch_pitcher_stats(pitcher_mlb_id: int, season: int = None) -> dict:
             break
 
     return season_stats
+
+
+def fetch_pitcher_home_away_splits(pitcher_id: int, season: int = None) -> dict:
+    """
+    Fetch home/away ERA/WHIP/K9/BB9 splits for a starter.
+    Returns {"home_era", "home_whip", "home_k9", "home_bb9",
+             "away_era", "away_whip", "away_k9", "away_bb9"}
+    or {} on failure/no data.
+    Cached per session.
+    """
+    if not pitcher_id:
+        return {}
+    if pitcher_id in _pitcher_split_cache:
+        return _pitcher_split_cache[pitcher_id]
+
+    _season = season or SEASON_YEAR
+    url = (
+        f"{MLB_BASE}/people/{pitcher_id}"
+        f"?hydrate=stats(group=[pitching],type=[statSplits],season={_season})"
+    )
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"[DATA] Error fetching splits for pitcher {pitcher_id}: {e}")
+        _pitcher_split_cache[pitcher_id] = {}
+        return {}
+
+    person = data.get("people", [{}])[0]
+    result = {}
+    for sg in person.get("stats", []):
+        for split in sg.get("splits", []):
+            code = split.get("split", {}).get("code", "")
+            s = split.get("stat", {})
+            if code == "H":
+                result["home_era"] = _safe_float(s.get("era"))
+                result["home_whip"] = _safe_float(s.get("whip"))
+                result["home_k9"] = _safe_float(s.get("strikeoutsPer9Inn"))
+                result["home_bb9"] = _safe_float(s.get("walksPer9Inn"))
+            elif code == "A":
+                result["away_era"] = _safe_float(s.get("era"))
+                result["away_whip"] = _safe_float(s.get("whip"))
+                result["away_k9"] = _safe_float(s.get("strikeoutsPer9Inn"))
+                result["away_bb9"] = _safe_float(s.get("walksPer9Inn"))
+
+    _pitcher_split_cache[pitcher_id] = result
+    return result
 
 
 # ──────────────────────────────────────────────
@@ -912,6 +961,10 @@ def collect_game_data(target_date: str = None) -> list:
         home_ps["days_rest"] = fetch_pitcher_rest(g.get("home_pitcher_id"))
         g["away_pitcher_stats"] = away_ps
         g["home_pitcher_stats"] = home_ps
+
+        # Home/away pitcher splits
+        g["away_pitcher_splits"] = fetch_pitcher_home_away_splits(g.get("away_pitcher_id"))
+        g["home_pitcher_splits"] = fetch_pitcher_home_away_splits(g.get("home_pitcher_id"))
 
         # Fetch team batting
         g["away_batting"] = fetch_team_batting(g["away_team_mlb_id"])
