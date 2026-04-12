@@ -142,13 +142,13 @@ Log API issues, missing data, or anomalies here.
 
 | Date | Issue | Impact | Resolution |
 |------|-------|--------|------------|
-| — | — | — | — |
+| 2026-04-12 | `schedule?hydrate=boxscore` doesn't return player-level pitcher stats for historical dates | pitcher_game_logs = 0 rows on backfill | Switched `collect_boxscores()` to `/game/{gamePk}/boxscore` per game; backfilled April 1-11 (~1,350 rows) |
 
 ### Known Ongoing Issues
 - Statcast data thin in April (small sample size for team stats early season)
 - FanGraphs scraping non-functional — wRC+ not available
 - Home/away pitcher splits not fetched — model uses season ERA only
-- Rolling stats: pitcher_game_logs/team_game_logs populated nightly after --results; backfill via --collect DATE; blend kicks in at 5+ games
+- Rolling stats active: pitcher_game_logs/team_game_logs backfilled April 1-11; auto-collected nightly via --results; blend kicks in at 5+ games
 - Line movement tracking not stored
 
 ---
@@ -179,10 +179,11 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 | 2026-04-11 | `run_results()` sent 0-0-0 Discord recap when no picks existed (missing `return` after "Nothing to grade") or when all picks were already graded | Fixed: early `return` after empty picks check; guard against `total == 0 and pushes == 0` before `send_results()` |
 | 2026-04-11 | `--refresh` sent cancel/reduce alerts for games already in progress or final — not actionable | Fixed: check `refreshed["status"]` in refresh loop; skip anything not in `{Scheduled, Pre-Game, Warmup, Delayed Start}` |
 | 2026-04-12 | `run_results()` crashed with `ValueError` parsing O/U total line — notes field format `"Total line: 8.5 \| Lineups confirmed"` broke naive `.replace()` + `float()` | Fixed: `_parse_total_line()` uses regex `r"Total line:\s*([\d.]+)"` to extract number regardless of trailing text |
+| 2026-04-12 | `collect_boxscores()` returned 0 pitcher rows for historical dates — `schedule?hydrate=boxscore` omits player-level stats for past games | Fixed: fetch `/game/{gamePk}/boxscore` per game; backfilled April 1-11 |
 
 ---
 
-## System Snapshot — 2026-04-11 (updated session 2)
+## System Snapshot — 2026-04-12 (updated session 3)
 
 ### What's been built
 - 7-agent weighted scoring engine with Discord alerts
@@ -198,6 +199,8 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 - **Weather at game start time** — `fetch_venue_weather()` uses `game_time_utc` + `zoneinfo` to select correct forecast hour; falls back to 7pm
 - **Travel fatigue** — `fetch_travel_context()` in data_mlb.py; away penalty: road_games≥5 → +0.04, tz_changes≥2 → +0.05, cap 0.08; in momentum agent
 - **ROI tracking** — `ml_odds`/`ou_odds` stored in picks table at send time; `get_roi_summary()` calculates true unit P&L; `--status` shows net units
+- **Rolling stats pipeline** — `pitcher_game_logs` + `team_game_logs` tables; `collect_boxscores()` uses `/game/{gamePk}/boxscore` per game (not hydrate — hydrate omits player stats for historical dates); auto-collects after `--results`; backfill via `--collect DATE`; blend weights: <5gs = season, 5-9 = 40%, 10-19 = 60%, ≥20 = 75%; pitching/offense/bullpen agents all blend; agent scores stored in `analysis_log` (7 columns) for optimizer signal
+- **Agent scores in analysis_log** — all 7 agent scores stored daily across all 15 games; optimizer has full signal data independent of pick filter
 
 ### Backtest findings (2024+2025, 4,855 games)
 | Metric | Value |
@@ -264,7 +267,7 @@ Items marked 🔲 are not yet scheduled.
 ✅ Pitcher scratch monitor — done 2026-04-11
 ✅ ROI tracking — done 2026-04-11
 ✅ Weather timing — done 2026-04-11
-🔲 Rolling 7-day team trends (momentum agent)
+✅ Rolling stats pipeline (pitching/offense/bullpen agents) — done 2026-04-12
 🔲 Home/away pitcher ERA splits (pitching agent)
 🔲 Travel fatigue — done 2026-04-11
 🔲 Opening line movement tracking (market agent)

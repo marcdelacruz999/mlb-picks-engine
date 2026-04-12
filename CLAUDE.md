@@ -286,7 +286,7 @@ Uses `<!-- id: improvement_id -->` HTML comment markers for optimizer dedup. Eac
 ## Known Limitations / Future Improvements
 
 - Rolling stats active: 21-day SP ERA/WHIP/K9/BB9, 14-day team R/G+OBP, 14-day bullpen ERA/WHIP; blend threshold <5 games → season only
-- Pitcher game logs may be sparse in April (MLB API boxscore hydrate doesn't always return individual pitcher lines for historical dates)
+- MLB API: `schedule?hydrate=boxscore` does NOT return player-level pitcher stats for historical dates — `collect_boxscores()` uses `/game/{gamePk}/boxscore` per game instead (verified fix 2026-04-12)
 - Home/away pitcher splits not yet fetched — uses season ERA only
 - Line movement tracking (opening vs current) not stored
 - FanGraphs scraping non-functional (requires JS) — wRC+ not available
