@@ -84,6 +84,7 @@ def run_analysis(dry_run: bool = False):
         today = date.today().isoformat()
         for a in analyses:
             ou = a.get("ou_pick") or {}
+            agents = a.get("agents", {})
             db.save_analysis_log({
                 "game_date": today,
                 "mlb_game_id": a["mlb_game_id"],
@@ -99,6 +100,13 @@ def run_analysis(dry_run: bool = False):
                 "ou_pick": ou.get("pick"),
                 "ou_line": ou.get("line"),
                 "ou_confidence": ou.get("confidence"),
+                "score_pitching": agents.get("pitching", {}).get("score"),
+                "score_offense": agents.get("offense", {}).get("score"),
+                "score_bullpen": agents.get("bullpen", {}).get("score"),
+                "score_advanced": agents.get("advanced", {}).get("score"),
+                "score_momentum": agents.get("momentum", {}).get("score"),
+                "score_market": agents.get("market", {}).get("score"),
+                "score_weather": agents.get("weather", {}).get("score"),
             })
         print(f"[DB] Logged {len(analyses)} game analyses to analysis_log.")
 
@@ -264,6 +272,7 @@ def run_refresh():
     today = date.today().isoformat()
     for a in analyses:
         ou = a.get("ou_pick") or {}
+        agents = a.get("agents", {})
         db.save_analysis_log({
             "game_date": today,
             "mlb_game_id": a["mlb_game_id"],
@@ -279,6 +288,13 @@ def run_refresh():
             "ou_pick": ou.get("pick"),
             "ou_line": ou.get("line"),
             "ou_confidence": ou.get("confidence"),
+            "score_pitching": agents.get("pitching", {}).get("score"),
+            "score_offense": agents.get("offense", {}).get("score"),
+            "score_bullpen": agents.get("bullpen", {}).get("score"),
+            "score_advanced": agents.get("advanced", {}).get("score"),
+            "score_momentum": agents.get("momentum", {}).get("score"),
+            "score_market": agents.get("market", {}).get("score"),
+            "score_weather": agents.get("weather", {}).get("score"),
         })
     print(f"[DB] Updated {len(analyses)} game analyses in analysis_log.")
 
@@ -579,6 +595,17 @@ def run_results():
     if sent:
         print("  📤 Results recap sent to Discord.")
 
+    # ── Collect and store post-game boxscore data ──
+    print("\n[DATA] Collecting post-game boxscore data...")
+    from data_mlb import collect_boxscores
+    boxscore_data = collect_boxscores(date.today().isoformat())
+    if boxscore_data["pitcher_logs"] or boxscore_data["team_logs"]:
+        db.store_boxscores(boxscore_data["pitcher_logs"], boxscore_data["team_logs"])
+        print(f"[DB] Stored {len(boxscore_data['pitcher_logs'])} pitcher lines, "
+              f"{len(boxscore_data['team_logs'])} team logs.")
+    else:
+        print("[DATA] No boxscore data collected.")
+
 
 def run_game_analysis(query: str):
     """
@@ -731,8 +758,8 @@ def _print_snapshot():
     print("\n" + "-" * 40)
     print("  TRACKING SNAPSHOT (Last 30 Days)")
     print("-" * 40)
-    roi = pick_summary.get("roi_per_unit")
-    roi_str = f"  {roi:+.3f} units" if roi is not None else ""
+    net = pick_summary.get("net_units")
+    roi_str = f"  {net:+.3f} units" if net is not None else ""
     print(f"  PICKS SENT:  {pick_summary['won']}W - {pick_summary['lost']}L - {pick_summary['push']}P  "
           f"({pick_summary['win_rate']}% win rate){roi_str}  [{pick_summary['total']} graded]")
     print(f"  MODEL ML:    {model_summary['ml_correct']}W - {model_summary['ml_incorrect']}L  "
@@ -743,6 +770,18 @@ def _print_snapshot():
 
 def main():
     args = sys.argv[1:]
+
+    if "--collect" in args:
+        idx = args.index("--collect")
+        target = args[idx + 1] if idx + 1 < len(args) else date.today().isoformat()
+        db.init_db()
+        print(f"[DATA] Collecting boxscores for {target}...")
+        from data_mlb import collect_boxscores
+        boxscore_data = collect_boxscores(target)
+        db.store_boxscores(boxscore_data["pitcher_logs"], boxscore_data["team_logs"])
+        print(f"[DB] Stored {len(boxscore_data['pitcher_logs'])} pitcher lines, "
+              f"{len(boxscore_data['team_logs'])} team logs for {target}.")
+        return
 
     if "--results" in args:
         run_results()
