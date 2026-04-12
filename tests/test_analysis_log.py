@@ -8,7 +8,7 @@ import database as db
 @pytest.fixture(autouse=True)
 def tmp_db(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test.db")
-    monkeypatch.setattr(db, "DATABASE_PATH", db_path)
+    monkeypatch.setattr(db, "DB_PATH", db_path)
     db.init_db()
     yield
     if os.path.exists(db_path):

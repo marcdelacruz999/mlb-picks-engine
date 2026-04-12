@@ -6,13 +6,17 @@ Tracks teams, picks, results, and ROI over time.
 
 import sqlite3
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from config import DATABASE_PATH
+
+# DB_PATH is the authoritative path used by get_connection().
+# Tests monkeypatch this attribute to redirect to a temp database.
+DB_PATH = DATABASE_PATH
 
 
 def get_connection():
     """Return a connection to the SQLite database."""
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -198,6 +202,13 @@ def init_db():
         ou_line REAL,
         ou_confidence INTEGER,
         ou_status TEXT DEFAULT 'pending' CHECK(ou_status IN ('pending','correct','incorrect','push','none')),
+        score_pitching REAL,
+        score_offense REAL,
+        score_bullpen REAL,
+        score_advanced REAL,
+        score_momentum REAL,
+        score_market REAL,
+        score_weather REAL,
         actual_away_score INTEGER,
         actual_home_score INTEGER,
         actual_total INTEGER,
@@ -217,11 +228,49 @@ def init_db():
         UNIQUE(game_date, mlb_game_id, side)
     );
 
+    CREATE TABLE IF NOT EXISTS pitcher_game_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mlb_game_id INTEGER,
+        game_date TEXT,
+        pitcher_id INTEGER,
+        pitcher_name TEXT,
+        team_id INTEGER,
+        is_starter INTEGER,
+        innings_pitched REAL,
+        earned_runs INTEGER,
+        strikeouts INTEGER,
+        walks INTEGER,
+        hits INTEGER,
+        home_runs INTEGER,
+        created_at TEXT,
+        UNIQUE(mlb_game_id, pitcher_id, game_date)
+    );
+
+    CREATE TABLE IF NOT EXISTS team_game_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mlb_game_id INTEGER,
+        game_date TEXT,
+        team_id INTEGER,
+        is_away INTEGER,
+        runs INTEGER,
+        hits INTEGER,
+        home_runs INTEGER,
+        strikeouts INTEGER,
+        walks INTEGER,
+        at_bats INTEGER,
+        left_on_base INTEGER,
+        created_at TEXT,
+        UNIQUE(mlb_game_id, team_id, game_date)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
     CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
     CREATE INDEX IF NOT EXISTS idx_picks_date ON picks(created_at);
     CREATE INDEX IF NOT EXISTS idx_picks_status ON picks(status);
+    CREATE INDEX IF NOT EXISTS idx_pitcher_logs_pitcher ON pitcher_game_logs(pitcher_id, game_date);
+    CREATE INDEX IF NOT EXISTS idx_pitcher_logs_team ON pitcher_game_logs(team_id, game_date);
+    CREATE INDEX IF NOT EXISTS idx_team_logs_team ON team_game_logs(team_id, game_date);
     """)
 
     conn.commit()
@@ -244,6 +293,14 @@ def init_db():
         conn.commit()
     except sqlite3.OperationalError:
         pass  # column already exists
+
+    for col in ("score_pitching", "score_offense", "score_bullpen", "score_advanced",
+                "score_momentum", "score_market", "score_weather"):
+        try:
+            conn.execute(f"ALTER TABLE analysis_log ADD COLUMN {col} REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
     conn.close()
     print("[DB] Database initialized.")
@@ -336,8 +393,10 @@ def save_analysis_log(entry: dict) -> int:
          away_pitcher, home_pitcher, composite_score,
          ml_pick_team, ml_win_probability, ml_confidence,
          ou_pick, ou_line, ou_confidence,
+         score_pitching, score_offense, score_bullpen, score_advanced,
+         score_momentum, score_market, score_weather,
          ml_status, ou_status, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         entry["game_date"], entry["mlb_game_id"], entry["game"],
         entry["away_team"], entry["home_team"],
@@ -345,6 +404,9 @@ def save_analysis_log(entry: dict) -> int:
         entry.get("composite_score", 0.0),
         entry["ml_pick_team"], entry["ml_win_probability"], entry["ml_confidence"],
         entry.get("ou_pick"), entry.get("ou_line"), entry.get("ou_confidence"),
+        entry.get("score_pitching"), entry.get("score_offense"), entry.get("score_bullpen"),
+        entry.get("score_advanced"), entry.get("score_momentum"), entry.get("score_market"),
+        entry.get("score_weather"),
         "pending", ou_status, now, now
     ))
     conn.commit()
@@ -597,6 +659,143 @@ def save_scratch_alert(mlb_game_id: int, game_date: str, old_pitcher: str, new_p
         print(f"[DB] Error saving scratch alert: {e}")
     finally:
         conn.close()
+
+
+# ── Rolling Stats ────────────────────────────────────────
+
+def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
+    """Store post-game boxscore data for all pitchers and teams."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    for p in pitcher_logs:
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO pitcher_game_logs
+                (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
+                 innings_pitched, earned_runs, strikeouts, walks, hits, home_runs, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (p["mlb_game_id"], p["game_date"], p["pitcher_id"], p["pitcher_name"],
+                  p["team_id"], int(p["is_starter"]),
+                  p["innings_pitched"], p["earned_runs"], p["strikeouts"],
+                  p["walks"], p["hits"], p["home_runs"], now))
+        except Exception as e:
+            print(f"[DB] store_boxscores pitcher error: {e}")
+    for t in team_logs:
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO team_game_logs
+                (mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs,
+                 strikeouts, walks, at_bats, left_on_base, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (t["mlb_game_id"], t["game_date"], t["team_id"], int(t["is_away"]),
+                  t["runs"], t["hits"], t["home_runs"], t["strikeouts"],
+                  t["walks"], t["at_bats"], t["left_on_base"], now))
+        except Exception as e:
+            print(f"[DB] store_boxscores team error: {e}")
+    conn.commit()
+    conn.close()
+
+
+def get_pitcher_rolling_stats(pitcher_id: int, days: int = 21,
+                               as_of_date: str = None) -> "dict | None":
+    """
+    Rolling ERA, WHIP, K/9, BB/9 for a pitcher over the last N days.
+    Returns None if no games found (caller falls back to season stats).
+    """
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT innings_pitched, earned_runs, strikeouts, walks, hits
+        FROM pitcher_game_logs
+        WHERE pitcher_id=? AND game_date > ? AND innings_pitched > 0
+        ORDER BY game_date DESC
+    """, (pitcher_id, cutoff.isoformat())).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    total_ip = sum(r["innings_pitched"] for r in rows)
+    total_er = sum(r["earned_runs"] for r in rows)
+    total_k = sum(r["strikeouts"] for r in rows)
+    total_bb = sum(r["walks"] for r in rows)
+    total_h = sum(r["hits"] for r in rows)
+    if total_ip == 0:
+        return None
+    return {
+        "era": round(total_er / total_ip * 9, 2),
+        "whip": round((total_h + total_bb) / total_ip, 3),
+        "k9": round(total_k / total_ip * 9, 2),
+        "bb9": round(total_bb / total_ip * 9, 2),
+        "games": len(rows),
+        "innings_pitched": round(total_ip, 2),
+    }
+
+
+def get_team_batting_rolling(team_id: int, days: int = 14,
+                              as_of_date: str = None) -> "dict | None":
+    """
+    Rolling runs/game, OBP proxy, HR/game, K% over last N days for a team.
+    OBP proxy = (H + BB) / (AB + BB).
+    Returns None if no games found.
+    """
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT runs, hits, home_runs, strikeouts, walks, at_bats
+        FROM team_game_logs
+        WHERE team_id=? AND game_date > ?
+        ORDER BY game_date DESC
+    """, (team_id, cutoff.isoformat())).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    g = len(rows)
+    total_runs = sum(r["runs"] for r in rows)
+    total_hits = sum(r["hits"] for r in rows)
+    total_hr = sum(r["home_runs"] for r in rows)
+    total_k = sum(r["strikeouts"] for r in rows)
+    total_bb = sum(r["walks"] for r in rows)
+    total_ab = sum(r["at_bats"] for r in rows)
+    pa = total_ab + total_bb
+    return {
+        "rpg": round(total_runs / g, 3),
+        "obp_proxy": round((total_hits + total_bb) / pa, 3) if pa > 0 else 0.0,
+        "hr_pg": round(total_hr / g, 3),
+        "k_pct": round(total_k / max(total_ab, 1), 3),
+        "games": g,
+    }
+
+
+def get_team_bullpen_rolling(team_id: int, days: int = 14,
+                              as_of_date: str = None) -> "dict | None":
+    """
+    Rolling ERA, WHIP, K/9 for relief pitchers (is_starter=0) over last N days.
+    Returns None if no appearances found.
+    """
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT innings_pitched, earned_runs, strikeouts, walks, hits
+        FROM pitcher_game_logs
+        WHERE team_id=? AND is_starter=0 AND game_date > ? AND innings_pitched > 0
+        ORDER BY game_date DESC
+    """, (team_id, cutoff.isoformat())).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    total_ip = sum(r["innings_pitched"] for r in rows)
+    total_er = sum(r["earned_runs"] for r in rows)
+    total_k = sum(r["strikeouts"] for r in rows)
+    total_bb = sum(r["walks"] for r in rows)
+    total_h = sum(r["hits"] for r in rows)
+    if total_ip == 0:
+        return None
+    return {
+        "era": round(total_er / total_ip * 9, 2),
+        "whip": round((total_h + total_bb) / total_ip, 3),
+        "k9": round(total_k / total_ip * 9, 2),
+        "games": len(rows),
+        "innings_pitched": round(total_ip, 2),
+    }
 
 
 # ── Alias for backward compatibility ─────────────────────
