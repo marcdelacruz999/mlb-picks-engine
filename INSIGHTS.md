@@ -36,6 +36,22 @@ Notes:
 
 <!-- Add daily entries below this line, newest first -->
 
+### 2026-04-11
+Picks: 5 sent | Results: 1-4-0 (W-L-P) | Net: -3.074 units
+
+| Game | Pick | Conf | Odds | Result | Final | Key Factor |
+|------|------|------|------|--------|-------|------------|
+| WSH @ MIL | OVER 8.5 | 9 | -121 | L | 3-1 (total 4) | Model projected 11.7 runs — extreme miss; both SPs dominant |
+| CWS @ KC | UNDER 9.0 | 8 | -108 | W | 0-2 (total 2) | Clean under, pitching dominated |
+| LAA @ CIN | UNDER 9.0 | 7 | -85 | L | 3-7 (total 10) | Went over; CIN offense outperformed model |
+| OAK @ NYM | NYM ML | 7 | -150 | L | A's 11-6 | A's blew out NYM despite Senga advantage |
+| SF @ BAL | SF ML | 7 | -100 | L | SF 2-6 | BAL offense outperformed xStats signal |
+
+Notes:
+- WSH/MIL OVER at conf 9 was worst miss — model xERA regression signals for both SPs fired but actual results were opposite; both pitchers had great outings despite xERA warning
+- A's at NYM: lineup confirmation showed even OPS but A's scored 11 — small sample early season Statcast may be unreliable
+- First day of live data — 1-4 is a small sample, no weight changes warranted yet
+
 ---
 
 ## Calibration Tracker
@@ -132,7 +148,7 @@ Log API issues, missing data, or anomalies here.
 - Statcast data thin in April (small sample size for team stats early season)
 - FanGraphs scraping non-functional — wRC+ not available
 - Home/away pitcher splits not fetched — model uses season ERA only
-- Rolling 7/14/30-day team trends not implemented — season stats only
+- Rolling stats: pitcher_game_logs/team_game_logs populated nightly after --results; backfill via --collect DATE; blend kicks in at 5+ games
 - Line movement tracking not stored
 
 ---

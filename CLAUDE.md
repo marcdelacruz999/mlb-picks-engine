@@ -38,6 +38,7 @@ python3 engine.py --status     # Print 30-day tracking snapshot
 python3 engine.py --game X     # Full 7-agent analysis of game(s) matching team name X, sent to Discord
                                # Bypasses confidence threshold — analysis only, no approved picks flow
                                # Examples: --game marlins | --game "marlins tigers" | --game yankees
+python3 engine.py --collect DATE  # Collect/store post-game boxscores for DATE (YYYY-MM-DD); auto-runs after --results
 ```
 
 ---
@@ -284,7 +285,8 @@ Uses `<!-- id: improvement_id -->` HTML comment markers for optimizer dedup. Eac
 
 ## Known Limitations / Future Improvements
 
-- Rolling 7/14/30-day team trends not yet implemented — uses season stats only
+- Rolling stats active: 21-day SP ERA/WHIP/K9/BB9, 14-day team R/G+OBP, 14-day bullpen ERA/WHIP; blend threshold <5 games → season only
+- Pitcher game logs may be sparse in April (MLB API boxscore hydrate doesn't always return individual pitcher lines for historical dates)
 - Home/away pitcher splits not yet fetched — uses season ERA only
 - Line movement tracking (opening vs current) not stored
 - FanGraphs scraping non-functional (requires JS) — wRC+ not available
