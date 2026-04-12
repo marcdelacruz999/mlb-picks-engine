@@ -144,3 +144,26 @@ def test_picks_table_accepts_f5_ml_pick_type(fresh_db):
     """, (now, now))
     conn.commit()
     conn.close()
+
+
+def test_grade_f5_pick_from_linescore():
+    """_grade_f5_pick returns 'won'/'lost'/'push' from inning scores."""
+    from engine import _grade_f5_pick
+
+    linescore = {
+        "innings": [
+            {"num": 1, "away": {"runs": 0}, "home": {"runs": 1}},
+            {"num": 2, "away": {"runs": 2}, "home": {"runs": 0}},
+            {"num": 3, "away": {"runs": 0}, "home": {"runs": 0}},
+            {"num": 4, "away": {"runs": 1}, "home": {"runs": 0}},
+            {"num": 5, "away": {"runs": 0}, "home": {"runs": 2}},
+            {"num": 6, "away": {"runs": 3}, "home": {"runs": 0}},  # innings 6+ ignored
+        ]
+    }
+    # F5: away=3 runs (inn 2+4), home=3 runs (inn 1+5) — push
+    assert _grade_f5_pick("f5_away", linescore) == "push"
+
+    # Modify: home scores more in F5
+    linescore["innings"][4]["home"]["runs"] = 3  # home gets 4 total in F5
+    assert _grade_f5_pick("f5_home", linescore) == "won"
+    assert _grade_f5_pick("f5_away", linescore) == "lost"

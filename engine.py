@@ -461,6 +461,43 @@ def _parse_total_line(notes: str) -> float:
     return float(match.group(1)) if match else 0.0
 
 
+def _fetch_f5_linescore(mlb_game_id: int) -> dict:
+    """Fetch linescore for a completed game. Returns {} on error."""
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/game/{mlb_game_id}/linescore"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        print(f"[DATA] Error fetching linescore for game {mlb_game_id}: {e}")
+        return {}
+
+
+def _grade_f5_pick(pick_type: str, linescore: dict) -> str:
+    """
+    Grade an F5 ML pick.
+    pick_type: 'f5_home' or 'f5_away'
+    Returns 'won', 'lost', or 'push'.
+    """
+    innings = linescore.get("innings", [])
+    away_f5 = sum(
+        (inn.get("away", {}).get("runs") or 0)
+        for inn in innings if 1 <= inn.get("num", 0) <= 5
+    )
+    home_f5 = sum(
+        (inn.get("home", {}).get("runs") or 0)
+        for inn in innings if 1 <= inn.get("num", 0) <= 5
+    )
+
+    if away_f5 == home_f5:
+        return "push"
+    if pick_type == "f5_home":
+        return "won" if home_f5 > away_f5 else "lost"
+    elif pick_type == "f5_away":
+        return "won" if away_f5 > home_f5 else "lost"
+    return "push"
+
+
 def run_results():
     """
     RESULTS GRADING
@@ -558,6 +595,21 @@ def run_results():
                 status = "lost"
             else:
                 status = "push"
+
+        elif pick["pick_type"] == "f5_ml":
+            # Fetch linescore to get F5 (innings 1-5) scores
+            linescore = _fetch_f5_linescore(mlb_game_id)
+            if linescore:
+                # Determine pick direction from pick_team vs home/away team name
+                home_name = result.get("home_team_name", "")
+                if pick.get("pick_team") == home_name:
+                    f5_direction = "f5_home"
+                else:
+                    f5_direction = "f5_away"
+                status = _grade_f5_pick(f5_direction, linescore)
+            else:
+                status = "push"  # can't grade without linescore
+
         else:
             status = "push"
 
