@@ -100,6 +100,8 @@ def _format_pick_message(pick: dict) -> str:
 
     if pick_type == "moneyline":
         pick_display = f"{pick_label} ML"
+    elif pick_type == "f5_ml":
+        pick_display = f"{pick_label} F5 ML (First 5 Innings)"
     elif pick_type == "over":
         pick_display = f"OVER {pick.get('notes', '').replace('Total line: ', '')}"
     elif pick_type == "under":

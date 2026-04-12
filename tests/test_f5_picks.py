@@ -114,3 +114,33 @@ def test_analyze_f5_pick_returns_none_when_no_f5_odds():
     from analysis import _analyze_f5_pick
     result = _analyze_f5_pick({}, {}, pitching_score=0.35)
     assert result is None
+
+
+import sqlite3
+import database as _db
+
+
+@pytest.fixture
+def fresh_db(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "test.db")
+    monkeypatch.setattr(_db, "DB_PATH", db_path)
+    _db.init_db()
+    return db_path
+
+
+def test_picks_table_accepts_f5_ml_pick_type(fresh_db):
+    """picks table must accept f5_ml, f5_over, f5_under without CHECK constraint error."""
+    conn = sqlite3.connect(fresh_db)
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    # Should not raise
+    conn.execute("""
+        INSERT INTO picks
+        (game_id, pick_type, pick_team, confidence, win_probability, edge_score,
+         projected_away_score, projected_home_score,
+         edge_pitching, edge_offense, edge_advanced, edge_bullpen, edge_weather, edge_market,
+         notes, ev_score, ml_odds, ou_odds, created_at, updated_at)
+        VALUES (1,'f5_ml','Red Sox',8,62.0,0.15,3.2,4.1,'','','','','','','F5',0.05,-130,NULL,?,?)
+    """, (now, now))
+    conn.commit()
+    conn.close()

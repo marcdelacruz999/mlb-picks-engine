@@ -147,7 +147,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS picks (
         id INTEGER PRIMARY KEY,
         game_id INTEGER,
-        pick_type TEXT CHECK(pick_type IN ('moneyline','over','under')),
+        pick_type TEXT,
         pick_team TEXT,
         confidence INTEGER CHECK(confidence BETWEEN 1 AND 10),
         win_probability REAL,
@@ -314,6 +314,51 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    # Migrate: remove CHECK constraint from pick_type by recreating picks table
+    # Test if f5_ml can be inserted; if not, recreate the table
+    try:
+        conn.execute("""
+            INSERT INTO picks (game_id, pick_type, confidence, win_probability, edge_score,
+                               projected_away_score, projected_home_score, created_at, updated_at)
+            VALUES (-1, 'f5_ml', 7, 50.0, 0.1, 0, 0, 'test', 'test')
+        """)
+        conn.rollback()  # don't actually insert
+    except sqlite3.IntegrityError:
+        # CHECK constraint present — recreate table without it
+        conn.execute("ALTER TABLE picks RENAME TO picks_old")
+        conn.execute("""
+            CREATE TABLE picks (
+                id INTEGER PRIMARY KEY,
+                game_id INTEGER,
+                pick_type TEXT,
+                pick_team TEXT,
+                confidence INTEGER CHECK(confidence BETWEEN 1 AND 10),
+                win_probability REAL,
+                edge_score REAL,
+                projected_away_score REAL,
+                projected_home_score REAL,
+                edge_pitching TEXT,
+                edge_offense TEXT,
+                edge_advanced TEXT,
+                edge_bullpen TEXT,
+                edge_weather TEXT,
+                edge_market TEXT,
+                notes TEXT,
+                ev_score REAL,
+                ml_odds INTEGER,
+                ou_odds INTEGER,
+                status TEXT DEFAULT 'pending' CHECK(status IN ('pending','won','lost','push','cancelled')),
+                discord_sent INTEGER DEFAULT 0,
+                created_at TEXT,
+                updated_at TEXT,
+                FOREIGN KEY (game_id) REFERENCES games(id)
+            )
+        """)
+        conn.execute("INSERT INTO picks SELECT * FROM picks_old")
+        conn.execute("DROP TABLE picks_old")
+        conn.commit()
+        print("[DB] Migrated picks table: removed pick_type CHECK constraint.")
 
     conn.close()
     print("[DB] Database initialized.")

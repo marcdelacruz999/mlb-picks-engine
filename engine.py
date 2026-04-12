@@ -20,7 +20,7 @@ from datetime import date, datetime
 
 import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
-from data_odds import fetch_odds, match_odds_to_game, implied_probability
+from data_odds import fetch_odds, match_odds_to_game, implied_probability, fetch_f5_odds, match_f5_odds_to_game
 from analysis import analyze_game, risk_filter, build_watchlist
 from discord_bot import send_pick, send_update, send_results, export_payload, _format_game_time
 from config import DISCORD_WEBHOOK_URL
@@ -62,6 +62,7 @@ def run_analysis(dry_run: bool = False):
     # Step 4: Odds
     print("[3/6] Fetching odds and lines...")
     odds_list = fetch_odds()
+    f5_odds_list = fetch_f5_odds()
 
     # Step 5: Analyze each game
     print(f"[4/6] Analyzing {len(games)} games...")
@@ -69,6 +70,11 @@ def run_analysis(dry_run: bool = False):
     for g in games:
         odds_data = match_odds_to_game(
             odds_list,
+            g.get("home_team_name", ""),
+            g.get("away_team_name", "")
+        )
+        g["f5_odds"] = match_f5_odds_to_game(
+            f5_odds_list,
             g.get("home_team_name", ""),
             g.get("away_team_name", "")
         )
@@ -261,12 +267,16 @@ def run_refresh():
         return
 
     odds_list = fetch_odds()
+    f5_odds_list = fetch_f5_odds()
     analyses = []
     for g in games:
         odds_data = match_odds_to_game(
             odds_list,
             g.get("home_team_name", ""),
             g.get("away_team_name", "")
+        )
+        g["f5_odds"] = match_f5_odds_to_game(
+            f5_odds_list, g.get("home_team_name", ""), g.get("away_team_name", "")
         )
         # Refresh opening lines capture (INSERT OR IGNORE no-ops if already saved today)
         if odds_data and odds_data.get("consensus"):
