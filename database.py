@@ -678,7 +678,7 @@ def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
                   p["team_id"], int(p["is_starter"]),
                   p["innings_pitched"], p["earned_runs"], p["strikeouts"],
                   p["walks"], p["hits"], p["home_runs"], now))
-        except Exception as e:
+        except sqlite3.DatabaseError as e:
             print(f"[DB] store_boxscores pitcher error: {e}")
     for t in team_logs:
         try:
@@ -690,7 +690,7 @@ def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
             """, (t["mlb_game_id"], t["game_date"], t["team_id"], int(t["is_away"]),
                   t["runs"], t["hits"], t["home_runs"], t["strikeouts"],
                   t["walks"], t["at_bats"], t["left_on_base"], now))
-        except Exception as e:
+        except sqlite3.DatabaseError as e:
             print(f"[DB] store_boxscores team error: {e}")
     conn.commit()
     conn.close()
@@ -760,7 +760,7 @@ def get_team_batting_rolling(team_id: int, days: int = 14,
         "rpg": round(total_runs / g, 3),
         "obp_proxy": round((total_hits + total_bb) / pa, 3) if pa > 0 else 0.0,
         "hr_pg": round(total_hr / g, 3),
-        "k_pct": round(total_k / max(total_ab, 1), 3),
+        "k_pct": round(total_k / total_ab, 3) if total_ab > 0 else 0.0,
         "games": g,
     }
 
