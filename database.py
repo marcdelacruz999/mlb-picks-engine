@@ -13,6 +13,8 @@ from config import DATABASE_PATH
 # Tests monkeypatch this attribute to redirect to a temp database.
 DB_PATH = DATABASE_PATH
 
+_LG_AVG_RPG = 4.3  # MLB average runs per game — used as denominator for quality weight
+
 
 def get_connection():
     """Return a connection to the SQLite database."""
@@ -793,6 +795,75 @@ def get_pitcher_rolling_stats(pitcher_id: int, days: int = 21,
         "bb9": round(total_bb / total_ip * 9, 2),
         "games": len(rows),
         "innings_pitched": round(total_ip, 2),
+    }
+
+
+def get_pitcher_rolling_stats_adjusted(pitcher_id: int, days: int = 21,
+                                        as_of_date: str = None) -> "dict | None":
+    """
+    Opponent-quality-adjusted rolling ERA/WHIP/K9/BB9.
+    Each game log is weighted by opponent_rpg / LG_AVG_RPG.
+    Opponent R/G is their 14-day rolling average up to the game date.
+    Falls back to equal weighting (weight=1.0) when opponent_team_id is NULL.
+
+    Returns same shape as get_pitcher_rolling_stats().
+    """
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT p.innings_pitched, p.earned_runs, p.strikeouts, p.walks, p.hits,
+               p.opponent_team_id, p.game_date
+        FROM pitcher_game_logs p
+        WHERE p.pitcher_id=? AND p.game_date > ? AND p.innings_pitched > 0
+        ORDER BY p.game_date DESC
+    """, (pitcher_id, cutoff.isoformat())).fetchall()
+
+    if not rows:
+        conn.close()
+        return None
+
+    total_ip_w = 0.0
+    total_er_w = 0.0
+    total_k_w = 0.0
+    total_bb_w = 0.0
+    total_h_w = 0.0
+
+    for r in rows:
+        ip = r["innings_pitched"]
+        opp_id = r["opponent_team_id"]
+        weight = 1.0  # default: no opponent data
+
+        if opp_id:
+            # Get opponent's R/G in 14 days before this game date
+            opp_cutoff = (date.fromisoformat(r["game_date"]) - timedelta(days=14)).isoformat()
+            opp_rows = conn.execute("""
+                SELECT SUM(runs) as total_runs, COUNT(*) as games
+                FROM team_game_logs
+                WHERE team_id=? AND game_date > ? AND game_date < ?
+            """, (opp_id, opp_cutoff, r["game_date"])).fetchone()
+
+            if opp_rows and opp_rows["games"] and opp_rows["games"] >= 3:
+                opp_rpg = (opp_rows["total_runs"] or 0) / opp_rows["games"]
+                weight = opp_rpg / _LG_AVG_RPG
+
+        total_ip_w += ip * weight
+        total_er_w += r["earned_runs"] * weight
+        total_k_w += r["strikeouts"] * weight
+        total_bb_w += r["walks"] * weight
+        total_h_w += r["hits"] * weight
+
+    conn.close()
+
+    if total_ip_w == 0:
+        return None
+
+    return {
+        "era": round(total_er_w / total_ip_w * 9, 2),
+        "whip": round((total_h_w + total_bb_w) / total_ip_w, 3),
+        "k9": round(total_k_w / total_ip_w * 9, 2),
+        "bb9": round(total_bb_w / total_ip_w * 9, 2),
+        "games": len(rows),
+        "innings_pitched": round(sum(r["innings_pitched"] for r in rows), 2),
     }
 
 

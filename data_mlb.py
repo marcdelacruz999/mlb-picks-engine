@@ -985,9 +985,11 @@ def collect_game_data(target_date: str = None) -> list:
 
         # Rolling stats (from stored game logs — improves as season progresses)
         import database as _db
-        g["away_pitcher_rolling"] = _db.get_pitcher_rolling_stats(
+        g["away_pitcher_rolling"] = _db.get_pitcher_rolling_stats_adjusted(
+            g.get("away_pitcher_id"), days=21) or _db.get_pitcher_rolling_stats(
             g.get("away_pitcher_id"), days=21)
-        g["home_pitcher_rolling"] = _db.get_pitcher_rolling_stats(
+        g["home_pitcher_rolling"] = _db.get_pitcher_rolling_stats_adjusted(
+            g.get("home_pitcher_id"), days=21) or _db.get_pitcher_rolling_stats(
             g.get("home_pitcher_id"), days=21)
         g["away_batting_rolling"] = _db.get_team_batting_rolling(
             g.get("away_team_mlb_id"), days=14)

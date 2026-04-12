@@ -99,3 +99,53 @@ def test_store_boxscores_saves_opponent_team_id(fresh_db):
     row = conn.execute("SELECT opponent_team_id FROM pitcher_game_logs WHERE pitcher_id=501").fetchone()
     conn.close()
     assert row[0] == 20
+
+
+def test_get_pitcher_rolling_stats_adjusted_returns_same_when_no_opponent_data(fresh_db):
+    """When opponent_team_id is NULL, adjusted should return valid data."""
+    conn = sqlite3.connect(fresh_db)
+    conn.execute("""
+        INSERT OR IGNORE INTO pitcher_game_logs
+        (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
+         opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs)
+        VALUES (?,?,?,?,?,1,NULL,?,?,?,?,?,?)
+    """, (77001, "2026-04-11", 601, "Test SP", 5, 6.0, 2, 8, 2, 5, 0))
+    conn.commit()
+    conn.close()
+
+    today = "2026-04-12"
+    plain = _db.get_pitcher_rolling_stats(601, days=21, as_of_date=today)
+    adjusted = _db.get_pitcher_rolling_stats_adjusted(601, days=21, as_of_date=today)
+    # Both should return valid ERA when no opponent data
+    assert plain is not None
+    assert adjusted is not None
+    assert plain["era"] == adjusted["era"]
+
+
+def test_get_pitcher_rolling_stats_adjusted_returns_valid_data_with_opponent(fresh_db):
+    """Adjusted stats function returns valid ERA > 0 when data exists."""
+    conn = sqlite3.connect(fresh_db)
+    # Insert opponent team batting logs (team 30 — strong offense)
+    for i, gd in enumerate(["2026-04-06", "2026-04-07", "2026-04-08",
+                             "2026-04-09", "2026-04-10", "2026-04-11"]):
+        conn.execute("""
+            INSERT OR IGNORE INTO team_game_logs
+            (mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs,
+             strikeouts, walks, at_bats, left_on_base)
+            VALUES (?,?,30,0,7,9,2,8,3,35,5)
+        """, (30000 + i, gd))
+
+    # Pitcher 700: 3 ER in 6 IP vs opponent 30
+    conn.execute("""
+        INSERT OR IGNORE INTO pitcher_game_logs
+        (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
+         opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs)
+        VALUES (70001, '2026-04-10', 700, 'SP Test', 5, 1, 30, 6.0, 3, 7, 2, 5, 0)
+    """)
+    conn.commit()
+    conn.close()
+
+    adjusted = _db.get_pitcher_rolling_stats_adjusted(700, days=21, as_of_date="2026-04-12")
+    assert adjusted is not None
+    assert "era" in adjusted
+    assert adjusted["era"] > 0
