@@ -75,3 +75,42 @@ def test_match_f5_odds_to_game_returns_empty_when_no_match():
     import data_odds
     result = data_odds.match_f5_odds_to_game([], "Sox", "Yankees")
     assert result == {}
+
+
+def test_analyze_f5_pick_recommends_home_ml_when_home_pitching_edge():
+    from analysis import _analyze_f5_pick
+
+    game = {
+        "home_team_name": "Boston Red Sox",
+        "away_team_name": "New York Yankees",
+        "projected_away_score": 3.5,
+        "projected_home_score": 4.2,
+    }
+    f5_odds = {"consensus": {"home_ml": -130, "away_ml": 110,
+                              "total_line": 4.5, "over_price": -115, "under_price": -105}}
+    # pitching_score > 0 means home pitching advantage
+    result = _analyze_f5_pick(game, f5_odds, pitching_score=0.30)
+
+    assert result["pick"] in ("f5_home", "f5_away")
+    assert result["pick"] == "f5_home"
+    assert result["confidence"] >= 7
+
+
+def test_analyze_f5_pick_returns_none_when_weak_pitching_signal():
+    from analysis import _analyze_f5_pick
+
+    game = {
+        "home_team_name": "Red Sox",
+        "away_team_name": "Yankees",
+        "projected_away_score": 4.0,
+        "projected_home_score": 4.0,
+    }
+    f5_odds = {"consensus": {"home_ml": -110, "away_ml": -110, "total_line": 4.5}}
+    result = _analyze_f5_pick(game, f5_odds, pitching_score=0.10)  # below 0.20 threshold
+    assert result is None
+
+
+def test_analyze_f5_pick_returns_none_when_no_f5_odds():
+    from analysis import _analyze_f5_pick
+    result = _analyze_f5_pick({}, {}, pitching_score=0.35)
+    assert result is None

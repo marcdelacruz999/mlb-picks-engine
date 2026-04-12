@@ -860,6 +860,10 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     # ── Over/Under analysis ──
     ou_pick = _analyze_over_under(game, odds_data, projected)
 
+    # ── F5 pick (only when strong pitching edge) ──
+    f5_odds = game.get("f5_odds", {})
+    f5_pick = _analyze_f5_pick(game, f5_odds, pitching["score"])
+
     # ── Lineup status ──
     home_lineup_confirmed = game.get("home_lineup_confirmed", False)
     away_lineup_confirmed = game.get("away_lineup_confirmed", False)
@@ -890,6 +894,9 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
 
         # Over/Under analysis
         "ou_pick": ou_pick,
+
+        # F5 pick
+        "f5_pick": f5_pick,
 
         # Projected score
         "projected_away_score": projected["away"],
@@ -989,6 +996,62 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
         conf = 5
 
     return {"pick": pick, "confidence": conf, "edge": edge_desc, "total_line": total_line}
+
+
+def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float) -> "dict | None":
+    """
+    Determine if there's an F5 (First 5 Innings) pick.
+    Only fires when pitching_score is strongly one-sided (|score| >= 0.20).
+    Returns pick dict or None.
+
+    Pick format:
+      {"pick": "f5_home" | "f5_away", "pick_team": str,
+       "pick_type": "f5_ml",
+       "confidence": int, "edge": str, "ml_odds": int}
+    """
+    if not f5_odds or not f5_odds.get("consensus"):
+        return None
+
+    consensus = f5_odds["consensus"]
+    if not consensus.get("home_ml") or not consensus.get("away_ml"):
+        return None
+
+    # Only recommend F5 when pitching signal is strong
+    if abs(pitching_score) < 0.20:
+        return None
+
+    if pitching_score > 0:
+        pick = "f5_home"
+        pick_team = game.get("home_team_name", "Home")
+        ml_odds = consensus.get("home_ml")
+        direction = "Home SP advantage"
+    else:
+        pick = "f5_away"
+        pick_team = game.get("away_team_name", "Away")
+        ml_odds = consensus.get("away_ml")
+        direction = "Away SP advantage"
+
+    # Confidence: based on pitching score magnitude
+    score_abs = abs(pitching_score)
+    if score_abs >= 0.40:
+        conf = 9
+    elif score_abs >= 0.30:
+        conf = 8
+    else:
+        conf = 7
+
+    edge = (f"F5 {direction} (pitching score {pitching_score:+.3f}) — "
+            f"isolates SP quality, eliminates bullpen variance")
+
+    return {
+        "pick": pick,
+        "pick_team": pick_team,
+        "pick_type": "f5_ml",
+        "confidence": conf,
+        "ml_odds": ml_odds,
+        "edge": edge,
+        "f5_total_line": consensus.get("total_line"),
+    }
 
 
 # ══════════════════════════════════════════════
@@ -1143,6 +1206,43 @@ def risk_filter(analyses: list) -> list:
                     "ev_score": ev_ou,
                 }
                 approved.append(ou_dict)
+
+        # F5 ML pick evaluation
+        f5 = a.get("f5_pick")
+        if f5 and f5.get("confidence", 0) >= MIN_CONFIDENCE:
+            f5_ml_odds = f5.get("ml_odds")
+            ev_f5 = _calculate_ev(f5["confidence"] / 10 * 100, f5_ml_odds)
+
+            if ev_f5 is not None and ev_f5 < MIN_EV:
+                print(f"[EV GATE] F5 rejected: {f5['pick_team']} "
+                      f"(conf {f5['confidence']}, EV {ev_f5:.4f} at {f5_ml_odds})")
+            else:
+                f5_dict = {
+                    "type": "f5",
+                    "game": a["game"],
+                    "away_team": a["away_team"],
+                    "home_team": a["home_team"],
+                    "pick_team": f5["pick_team"],
+                    "pick_type": f5["pick_type"],  # "f5_ml"
+                    "confidence": f5["confidence"],
+                    "win_probability": a["ml_win_probability"],
+                    "edge_score": a["ml_edge_score"],
+                    "projected_away_score": a["projected_away_score"],
+                    "projected_home_score": a["projected_home_score"],
+                    "edge_pitching": a["agents"]["pitching"]["edge"],
+                    "edge_offense": a["agents"]["offense"]["edge"],
+                    "edge_advanced": a["agents"]["advanced"]["edge"],
+                    "edge_bullpen": a["agents"]["bullpen"]["edge"],
+                    "edge_weather": a["agents"]["weather"]["edge"],
+                    "edge_market": f5["edge"],
+                    "notes": f"F5 ML | F5 total: {f5.get('f5_total_line', '?')} | {a.get('lineup_status', '')}",
+                    "mlb_game_id": a["mlb_game_id"],
+                    "game_time_utc": a.get("game_time_utc", ""),
+                    "analysis": a,
+                    "ml_odds": f5_ml_odds,
+                    "ev_score": ev_f5,
+                }
+                approved.append(f5_dict)
 
     # Sort by confidence (highest first) and cap volume
     approved.sort(key=lambda x: x["confidence"], reverse=True)
