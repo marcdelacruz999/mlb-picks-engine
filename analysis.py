@@ -27,12 +27,27 @@ def score_pitching(game: dict) -> dict:
     if not home_p or not away_p:
         return {"score": 0.0, "edge": "Insufficient pitcher data", "detail": {}}
 
-    # Lower ERA = better → advantage to the team whose pitcher has lower ERA
-    era_diff = _safe(away_p.get("era")) - _safe(home_p.get("era"))
-    whip_diff = _safe(away_p.get("whip")) - _safe(home_p.get("whip"))
-    k9_diff = _safe(home_p.get("k_per_9")) - _safe(away_p.get("k_per_9"))
-    bb9_diff = _safe(away_p.get("bb_per_9")) - _safe(home_p.get("bb_per_9"))
-    kbb_diff = _safe(home_p.get("k_bb_ratio")) - _safe(away_p.get("k_bb_ratio"))
+    # Blend rolling stats if available
+    away_rolling = game.get("away_pitcher_rolling") or {}
+    home_rolling = game.get("home_pitcher_rolling") or {}
+    away_g = away_rolling.get("games", 0)
+    home_g = home_rolling.get("games", 0)
+
+    away_era  = _blend(_safe(away_p.get("era")),      away_rolling.get("era"),  away_g)
+    away_whip = _blend(_safe(away_p.get("whip")),     away_rolling.get("whip"), away_g)
+    away_k9   = _blend(_safe(away_p.get("k_per_9")),  away_rolling.get("k9"),   away_g)
+    away_bb9  = _blend(_safe(away_p.get("bb_per_9")), away_rolling.get("bb9"),  away_g)
+
+    home_era  = _blend(_safe(home_p.get("era")),      home_rolling.get("era"),  home_g)
+    home_whip = _blend(_safe(home_p.get("whip")),     home_rolling.get("whip"), home_g)
+    home_k9   = _blend(_safe(home_p.get("k_per_9")),  home_rolling.get("k9"),   home_g)
+    home_bb9  = _blend(_safe(home_p.get("bb_per_9")), home_rolling.get("bb9"),  home_g)
+
+    era_diff  = away_era  - home_era
+    whip_diff = away_whip - home_whip
+    k9_diff   = home_k9   - away_k9
+    bb9_diff  = away_bb9  - home_bb9
+    kbb_diff  = _safe(home_p.get("k_bb_ratio")) - _safe(away_p.get("k_bb_ratio"))
 
     # Weighted pitching score
     raw = (
@@ -112,6 +127,9 @@ def score_pitching(game: dict) -> dict:
 
     if rest_notes:
         edge += f" | {rest_notes[0]}"
+
+    if away_g >= 5 or home_g >= 5:
+        edge += f" [rolling: {away_g}gs away, {home_g}gs home]"
 
     return {
         "score": round(score, 3),
@@ -1084,6 +1102,25 @@ def _safe(val) -> float:
 
 def _clamp(val: float, lo: float = -1.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, val))
+
+def _blend(season_val: float, rolling_val, rolling_games: int) -> float:
+    """
+    Blend season stat with rolling stat based on number of rolling games available.
+    Gracefully degrades to season-only when rolling data is sparse.
+      < 5 games  → 100% season
+      5–9 games  → 40% rolling / 60% season
+      10–19 games → 60% rolling / 40% season
+      ≥ 20 games → 75% rolling / 25% season
+    """
+    if rolling_val is None or rolling_games < 5:
+        return season_val
+    if rolling_games < 10:
+        w = 0.4
+    elif rolling_games < 20:
+        w = 0.6
+    else:
+        w = 0.75
+    return rolling_val * w + season_val * (1 - w)
 
 def _clamp_prob(val: float) -> float:
     return max(0.01, min(0.99, val))

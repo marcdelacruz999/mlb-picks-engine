@@ -265,3 +265,63 @@ def test_collect_boxscores_handles_api_error():
     with patch("data_mlb.requests.get", side_effect=Exception("timeout")):
         result = data_mlb.collect_boxscores("2026-04-11")
     assert result == {"pitcher_logs": [], "team_logs": []}
+
+
+import analysis
+
+
+def test_blend_uses_season_when_no_rolling():
+    result = analysis._blend(season_val=4.50, rolling_val=None, rolling_games=0)
+    assert result == 4.50
+
+
+def test_blend_season_only_below_threshold():
+    # < 5 games → use season only
+    result = analysis._blend(season_val=4.50, rolling_val=2.10, rolling_games=3)
+    assert result == 4.50
+
+
+def test_blend_weighted_5_to_9_games():
+    # 5-9 games → 40% rolling, 60% season
+    result = analysis._blend(season_val=4.50, rolling_val=2.50, rolling_games=7)
+    expected = 0.4 * 2.50 + 0.6 * 4.50
+    assert abs(result - expected) < 0.001
+
+
+def test_blend_weighted_10_to_19_games():
+    # 10-19 games → 60% rolling, 40% season
+    result = analysis._blend(season_val=4.50, rolling_val=2.50, rolling_games=12)
+    expected = 0.6 * 2.50 + 0.4 * 4.50
+    assert abs(result - expected) < 0.001
+
+
+def test_blend_weighted_20_plus_games():
+    # ≥ 20 games → 75% rolling, 25% season
+    result = analysis._blend(season_val=4.50, rolling_val=2.50, rolling_games=25)
+    expected = 0.75 * 2.50 + 0.25 * 4.50
+    assert abs(result - expected) < 0.001
+
+
+def test_score_pitching_uses_rolling_when_available():
+    game = {
+        "away_pitcher_stats": {
+            "name": "Away SP", "throws": "R", "era": 5.00, "whip": 1.50,
+            "k_per_9": 7.0, "bb_per_9": 3.5, "k_bb_ratio": 2.0,
+            "days_rest": 4,
+        },
+        "home_pitcher_stats": {
+            "name": "Home SP", "throws": "R", "era": 5.00, "whip": 1.50,
+            "k_per_9": 7.0, "bb_per_9": 3.5, "k_bb_ratio": 2.0,
+            "days_rest": 4,
+        },
+        "away_batting": {"ops": 0.720, "obp": 0.320, "slg": 0.400,
+                         "runs": 80, "games_played": 20, "strikeouts": 150, "at_bats": 600},
+        "home_batting": {"ops": 0.720, "obp": 0.320, "slg": 0.400,
+                         "runs": 80, "games_played": 20, "strikeouts": 150, "at_bats": 600},
+        # Away pitcher rolling: much better ERA/WHIP → should push score toward away (negative)
+        "away_pitcher_rolling": {"era": 1.50, "whip": 0.80, "k9": 10.0, "bb9": 1.5, "games": 20},
+        "home_pitcher_rolling": None,
+    }
+    result = analysis.score_pitching(game)
+    # Away pitcher has rolling ERA 1.50 blended vs season 5.00 → away should have edge (negative score)
+    assert result["score"] < 0.0
