@@ -345,3 +345,22 @@ def test_score_offense_uses_rolling_when_available():
     result = analysis.score_offense(game)
     # Away much better rolling → negative score (away edge)
     assert result["score"] < 0.0
+
+
+def test_score_bullpen_uses_rolling_era_when_available():
+    game = {
+        "away_pitching": {"era": 4.00, "whip": 1.35, "k_per_9": 8.5,
+                          "saves": 5, "save_opportunities": 7, "holds": 10},
+        "home_pitching": {"era": 4.00, "whip": 1.35, "k_per_9": 8.5,
+                          "saves": 5, "save_opportunities": 7, "holds": 10},
+        "away_bullpen_usage": {"ip_last_3": 0.0, "ip_last_5": 0.0,
+                               "games_last_3": 0, "games_last_5": 0},
+        "home_bullpen_usage": {"ip_last_3": 0.0, "ip_last_5": 0.0,
+                               "games_last_3": 0, "games_last_5": 0},
+        # Home bullpen rolling much better ERA (1.80 vs 5.50)
+        "away_bullpen_rolling": {"era": 5.50, "whip": 1.60, "k9": 7.0, "games": 20},
+        "home_bullpen_rolling": {"era": 1.80, "whip": 0.95, "k9": 10.5, "games": 20},
+    }
+    result = analysis.score_bullpen(game)
+    # Home bullpen much better → positive score
+    assert result["score"] > 0.10

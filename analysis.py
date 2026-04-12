@@ -273,9 +273,20 @@ def score_bullpen(game: dict) -> dict:
     if not home_bp or not away_bp:
         return {"score": 0.0, "edge": "Insufficient bullpen data", "detail": {}}
 
-    era_diff = _safe(away_bp.get("era")) - _safe(home_bp.get("era"))
-    whip_diff = _safe(away_bp.get("whip")) - _safe(home_bp.get("whip"))
-    k9_diff = _safe(home_bp.get("k_per_9")) - _safe(away_bp.get("k_per_9"))
+    # Blend rolling bullpen stats if available
+    away_bp_r = game.get("away_bullpen_rolling") or {}
+    home_bp_r = game.get("home_bullpen_rolling") or {}
+    away_brg = away_bp_r.get("games", 0)
+    home_brg = home_bp_r.get("games", 0)
+
+    away_bp_era  = _blend(_safe(away_bp.get("era")),  away_bp_r.get("era"),  away_brg)
+    away_bp_whip = _blend(_safe(away_bp.get("whip")), away_bp_r.get("whip"), away_brg)
+    home_bp_era  = _blend(_safe(home_bp.get("era")),  home_bp_r.get("era"),  home_brg)
+    home_bp_whip = _blend(_safe(home_bp.get("whip")), home_bp_r.get("whip"), home_brg)
+
+    era_diff  = away_bp_era  - home_bp_era
+    whip_diff = away_bp_whip - home_bp_whip
+    k9_diff   = _safe(home_bp.get("k_per_9")) - _safe(away_bp.get("k_per_9"))
 
     home_sv = _safe(home_bp.get("saves"))
     home_svo = max(_safe(home_bp.get("save_opportunities")), 1)
