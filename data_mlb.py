@@ -564,6 +564,10 @@ def collect_boxscores(game_date: str) -> dict:
             print(f"[DATA] collect_boxscores boxscore error game {game_pk}: {e}")
             continue
 
+        # Get both team IDs for opponent cross-reference
+        away_team_id = boxscore.get("teams", {}).get("away", {}).get("team", {}).get("id")
+        home_team_id = boxscore.get("teams", {}).get("home", {}).get("team", {}).get("id")
+
         for side in ("away", "home"):
             team_data = boxscore.get("teams", {}).get(side, {})
             team_id = team_data.get("team", {}).get("id")
@@ -587,6 +591,7 @@ def collect_boxscores(game_date: str) -> dict:
                     "pitcher_name": player.get("person", {}).get("fullName", "Unknown"),
                     "team_id": team_id,
                     "is_starter": (idx == 0),
+                    "opponent_team_id": home_team_id if side == "away" else away_team_id,
                     "innings_pitched": ip,
                     "earned_runs": pstats.get("earnedRuns", 0) or 0,
                     "strikeouts": pstats.get("strikeOuts", 0) or 0,

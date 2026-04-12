@@ -236,6 +236,7 @@ def init_db():
         pitcher_name TEXT,
         team_id INTEGER,
         is_starter INTEGER,
+        opponent_team_id INTEGER,
         innings_pitched REAL,
         earned_runs INTEGER,
         strikeouts INTEGER,
@@ -314,6 +315,12 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass  # column already exists
+
+    try:
+        conn.execute("ALTER TABLE pitcher_game_logs ADD COLUMN opponent_team_id INTEGER")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
     # Migrate: remove CHECK constraint from pick_type by recreating picks table
     # Test if f5_ml can be inserted; if not, recreate the table
@@ -730,10 +737,11 @@ def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
             conn.execute("""
                 INSERT OR IGNORE INTO pitcher_game_logs
                 (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
-                 innings_pitched, earned_runs, strikeouts, walks, hits, home_runs, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (p["mlb_game_id"], p["game_date"], p["pitcher_id"], p["pitcher_name"],
                   p["team_id"], int(p["is_starter"]),
+                  p.get("opponent_team_id"),
                   p["innings_pitched"], p["earned_runs"], p["strikeouts"],
                   p["walks"], p["hits"], p["home_runs"], now))
         except sqlite3.DatabaseError as e:
