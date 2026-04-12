@@ -38,16 +38,16 @@ def score_pitching(game: dict) -> dict:
     home_splits = game.get("home_pitcher_splits") or {}
 
     # Season ERA for blend base — use venue-specific split if available
-    away_era_season = away_splits.get("away_era") or _safe(away_p.get("era"))
-    home_era_season = home_splits.get("home_era") or _safe(home_p.get("era"))
-    away_whip_season = away_splits.get("away_whip") or _safe(away_p.get("whip"))
-    home_whip_season = home_splits.get("home_whip") or _safe(home_p.get("whip"))
+    _ae = away_splits.get("away_era"); away_era_season = _ae if _ae is not None else _safe(away_p.get("era"))
+    _he = home_splits.get("home_era"); home_era_season = _he if _he is not None else _safe(home_p.get("era"))
+    _aw = away_splits.get("away_whip"); away_whip_season = _aw if _aw is not None else _safe(away_p.get("whip"))
+    _hw = home_splits.get("home_whip"); home_whip_season = _hw if _hw is not None else _safe(home_p.get("whip"))
 
     # K9/BB9: use split if available, else season
-    away_k9_season = away_splits.get("away_k9") or _safe(away_p.get("k_per_9"))
-    home_k9_season = home_splits.get("home_k9") or _safe(home_p.get("k_per_9"))
-    away_bb9_season = away_splits.get("away_bb9") or _safe(away_p.get("bb_per_9"))
-    home_bb9_season = home_splits.get("home_bb9") or _safe(home_p.get("bb_per_9"))
+    _ak = away_splits.get("away_k9"); away_k9_season = _ak if _ak is not None else _safe(away_p.get("k_per_9"))
+    _hk = home_splits.get("home_k9"); home_k9_season = _hk if _hk is not None else _safe(home_p.get("k_per_9"))
+    _ab = away_splits.get("away_bb9"); away_bb9_season = _ab if _ab is not None else _safe(away_p.get("bb_per_9"))
+    _hb = home_splits.get("home_bb9"); home_bb9_season = _hb if _hb is not None else _safe(home_p.get("bb_per_9"))
 
     away_era  = _blend(away_era_season,  away_rolling.get("era"),  away_g)
     away_whip = _blend(away_whip_season, away_rolling.get("whip"), away_g)
