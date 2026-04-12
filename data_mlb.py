@@ -480,74 +480,88 @@ def collect_boxscores(game_date: str) -> dict:
       }
     Only includes games with abstractGameState == "Final".
     Pitchers with 0 recorded IP are skipped.
+
+    Uses individual game boxscore endpoint (/game/{pk}/boxscore) so that full
+    pitcher-level player stats are available for both live and historical dates.
     """
-    url = (
-        f"{MLB_BASE}/schedule"
-        f"?sportId=1&date={game_date}&gameType=R&hydrate=boxscore"
-    )
+    # Step 1: get list of Final game PKs for the date
+    schedule_url = f"{MLB_BASE}/schedule?sportId=1&date={game_date}&gameType=R"
     try:
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(schedule_url, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
+        schedule = resp.json()
     except Exception as e:
-        print(f"[DATA] collect_boxscores error for {game_date}: {e}")
+        print(f"[DATA] collect_boxscores schedule error for {game_date}: {e}")
         return {"pitcher_logs": [], "team_logs": []}
+
+    final_game_pks = [
+        game["gamePk"]
+        for date_entry in schedule.get("dates", [])
+        for game in date_entry.get("games", [])
+        if game.get("status", {}).get("abstractGameState") == "Final"
+    ]
 
     pitcher_logs = []
     team_logs = []
 
-    for date_entry in data.get("dates", []):
-        for game in date_entry.get("games", []):
-            if game.get("status", {}).get("abstractGameState") != "Final":
+    # Step 2: fetch individual boxscore for each Final game
+    for game_pk in final_game_pks:
+        try:
+            bs_url = f"{MLB_BASE}/game/{game_pk}/boxscore"
+            resp = requests.get(bs_url, timeout=15)
+            resp.raise_for_status()
+            boxscore = resp.json()
+        except Exception as e:
+            print(f"[DATA] collect_boxscores boxscore error game {game_pk}: {e}")
+            continue
+
+        for side in ("away", "home"):
+            team_data = boxscore.get("teams", {}).get(side, {})
+            team_id = team_data.get("team", {}).get("id")
+            if not team_id:
                 continue
 
-            game_pk = game["gamePk"]
+            pitcher_ids = team_data.get("pitchers", [])
+            players = team_data.get("players", {})
 
-            for side in ("away", "home"):
-                team_data = game.get("teams", {}).get(side, {})
-                team_id = team_data.get("team", {}).get("id")
-                if not team_id:
-                    continue
-
-                pitcher_ids = team_data.get("pitchers", [])
-                players = team_data.get("players", {})
-
-                for idx, pid in enumerate(pitcher_ids):
-                    player = players.get(f"ID{pid}", {})
-                    pstats = player.get("stats", {}).get("pitching", {})
-                    ip_str = pstats.get("inningsPitched", "0.0")
-                    ip = _parse_ip(ip_str)
-                    if ip == 0.0:
-                        continue  # skip pitchers who didn't record an out
-                    pitcher_logs.append({
-                        "mlb_game_id": game_pk,
-                        "game_date": game_date,
-                        "pitcher_id": pid,
-                        "pitcher_name": player.get("person", {}).get("fullName", "Unknown"),
-                        "team_id": team_id,
-                        "is_starter": (idx == 0),
-                        "innings_pitched": ip,
-                        "earned_runs": pstats.get("earnedRuns", 0) or 0,
-                        "strikeouts": pstats.get("strikeOuts", 0) or 0,
-                        "walks": pstats.get("baseOnBalls", 0) or 0,
-                        "hits": pstats.get("hits", 0) or 0,
-                        "home_runs": pstats.get("homeRuns", 0) or 0,
-                    })
-
-                bat = team_data.get("teamStats", {}).get("batting", {})
-                team_logs.append({
+            for idx, pid in enumerate(pitcher_ids):
+                player = players.get(f"ID{pid}", {})
+                pstats = player.get("stats", {}).get("pitching", {})
+                ip_str = pstats.get("inningsPitched", "0.0")
+                ip = _parse_ip(ip_str)
+                if ip == 0.0:
+                    continue  # skip pitchers who didn't record an out
+                pitcher_logs.append({
                     "mlb_game_id": game_pk,
                     "game_date": game_date,
+                    "pitcher_id": pid,
+                    "pitcher_name": player.get("person", {}).get("fullName", "Unknown"),
                     "team_id": team_id,
-                    "is_away": (side == "away"),
-                    "runs": bat.get("runs", 0) or 0,
-                    "hits": bat.get("hits", 0) or 0,
-                    "home_runs": bat.get("homeRuns", 0) or 0,
-                    "strikeouts": bat.get("strikeOuts", 0) or 0,
-                    "walks": bat.get("baseOnBalls", 0) or 0,
-                    "at_bats": bat.get("atBats", 0) or 0,
-                    "left_on_base": bat.get("leftOnBase", 0) or 0,
+                    "is_starter": (idx == 0),
+                    "innings_pitched": ip,
+                    "earned_runs": pstats.get("earnedRuns", 0) or 0,
+                    "strikeouts": pstats.get("strikeOuts", 0) or 0,
+                    "walks": pstats.get("baseOnBalls", 0) or 0,
+                    "hits": pstats.get("hits", 0) or 0,
+                    "home_runs": pstats.get("homeRuns", 0) or 0,
                 })
+
+            bat = team_data.get("teamStats", {}).get("batting", {})
+            team_logs.append({
+                "mlb_game_id": game_pk,
+                "game_date": game_date,
+                "team_id": team_id,
+                "is_away": (side == "away"),
+                "runs": bat.get("runs", 0) or 0,
+                "hits": bat.get("hits", 0) or 0,
+                "home_runs": bat.get("homeRuns", 0) or 0,
+                "strikeouts": bat.get("strikeOuts", 0) or 0,
+                "walks": bat.get("baseOnBalls", 0) or 0,
+                "at_bats": bat.get("atBats", 0) or 0,
+                "left_on_base": bat.get("leftOnBase", 0) or 0,
+            })
+
+        time.sleep(0.2)  # polite to the API between game fetches
 
     print(f"[DATA] collect_boxscores {game_date}: {len(pitcher_logs)} pitcher lines, {len(team_logs)} team logs")
     return {"pitcher_logs": pitcher_logs, "team_logs": team_logs}
