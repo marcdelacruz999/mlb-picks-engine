@@ -325,3 +325,23 @@ def test_score_pitching_uses_rolling_when_available():
     result = analysis.score_pitching(game)
     # Away pitcher has rolling ERA 1.50 blended vs season 5.00 → away should have edge (negative score)
     assert result["score"] < 0.0
+
+
+def test_score_offense_uses_rolling_when_available():
+    game = {
+        "away_batting": {"ops": 0.700, "obp": 0.310, "slg": 0.390,
+                         "runs": 80, "games_played": 20,
+                         "strikeouts": 150, "at_bats": 600},
+        "home_batting": {"ops": 0.700, "obp": 0.310, "slg": 0.390,
+                         "runs": 80, "games_played": 20,
+                         "strikeouts": 150, "at_bats": 600},
+        "away_pitcher_stats": {}, "home_pitcher_stats": {},
+        # Away team rolling much better — should push score toward away edge (negative)
+        "away_batting_rolling": {"rpg": 7.0, "obp_proxy": 0.380,
+                                  "hr_pg": 1.5, "k_pct": 0.18, "games": 20},
+        "home_batting_rolling": {"rpg": 3.0, "obp_proxy": 0.280,
+                                  "hr_pg": 0.5, "k_pct": 0.28, "games": 20},
+    }
+    result = analysis.score_offense(game)
+    # Away much better rolling → negative score (away edge)
+    assert result["score"] < 0.0

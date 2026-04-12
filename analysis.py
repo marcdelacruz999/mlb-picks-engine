@@ -160,13 +160,24 @@ def score_offense(game: dict) -> dict:
     if not home_b or not away_b:
         return {"score": 0.0, "edge": "Insufficient batting data", "detail": {}}
 
-    ops_diff = _safe(home_b.get("ops")) - _safe(away_b.get("ops"))
-    obp_diff = _safe(home_b.get("obp")) - _safe(away_b.get("obp"))
-    slg_diff = _safe(home_b.get("slg")) - _safe(away_b.get("slg"))
+    # Blend rolling batting stats if available
+    away_bat_r = game.get("away_batting_rolling") or {}
+    home_bat_r = game.get("home_batting_rolling") or {}
+    away_rg = away_bat_r.get("games", 0)
+    home_rg = home_bat_r.get("games", 0)
 
-    # Runs per game
-    home_rpg = _safe(home_b.get("runs")) / max(_safe(home_b.get("games_played")), 1)
-    away_rpg = _safe(away_b.get("runs")) / max(_safe(away_b.get("games_played")), 1)
+    away_rpg_season = _safe(away_b.get("runs")) / max(_safe(away_b.get("games_played")), 1)
+    home_rpg_season = _safe(home_b.get("runs")) / max(_safe(home_b.get("games_played")), 1)
+
+    away_rpg = _blend(away_rpg_season, away_bat_r.get("rpg"), away_rg)
+    home_rpg = _blend(home_rpg_season, home_bat_r.get("rpg"), home_rg)
+
+    away_obp = _blend(_safe(away_b.get("obp")), away_bat_r.get("obp_proxy"), away_rg)
+    home_obp = _blend(_safe(home_b.get("obp")), home_bat_r.get("obp_proxy"), home_rg)
+
+    ops_diff = _safe(home_b.get("ops")) - _safe(away_b.get("ops"))
+    obp_diff = home_obp - away_obp
+    slg_diff = _safe(home_b.get("slg")) - _safe(away_b.get("slg"))
     rpg_diff = home_rpg - away_rpg
 
     raw = (
