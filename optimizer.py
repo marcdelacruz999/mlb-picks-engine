@@ -150,6 +150,243 @@ def get_db():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  FULL PIPELINE SNAPSHOT
+#  Gives the optimizer (and any Claude task prompt) a complete, current picture
+#  of the entire engine — files, DB state, data coverage, gaps.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def snapshot_pipeline():
+    """
+    Build a comprehensive snapshot of the entire engine state.
+
+    Returns a dict with:
+      - file_summary: key files + sizes
+      - db_tables: all tables with row counts and schema summaries
+      - data_coverage: what stats/fields are populated vs sparse
+      - data_gaps: fields that exist but are mostly null/empty
+      - collection_health: rolling stats freshness per table
+    """
+    today = date.today()
+
+    # ── File inventory ──
+    key_files = [
+        "engine.py", "analysis.py", "data_mlb.py", "data_odds.py",
+        "discord_bot.py", "database.py", "config.py", "monitor.py",
+        "optimizer.py", "backtest.py",
+        "CLAUDE.md", "PIPELINE.md", "INSIGHTS.md", "COMPLETED_IMPROVEMENTS.md",
+    ]
+    file_summary = {}
+    for f in key_files:
+        p = PROJECT_ROOT / f
+        if p.exists():
+            lines = len(p.read_text(errors="replace").splitlines())
+            file_summary[f] = lines
+        else:
+            file_summary[f] = None  # missing
+
+    # ── DB table row counts + schema ──
+    conn = get_db()
+    tables = conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type='table' ORDER BY name"
+    ).fetchall()
+
+    db_tables = {}
+    for t in tables:
+        name = t["name"]
+        count = conn.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0]
+        # Pull column names from schema
+        cols = [c[1] for c in conn.execute(f"PRAGMA table_info({name})").fetchall()]
+        db_tables[name] = {"rows": count, "columns": cols}
+
+    # ── Data coverage: nulls in key columns ──
+    data_coverage = {}
+
+    # pitcher_game_logs: check opponent_team_id population
+    if db_tables.get("pitcher_game_logs", {}).get("rows", 0) > 0:
+        total = db_tables["pitcher_game_logs"]["rows"]
+        with_opp = conn.execute(
+            "SELECT COUNT(*) FROM pitcher_game_logs WHERE opponent_team_id IS NOT NULL"
+        ).fetchone()[0]
+        recent_dates = conn.execute(
+            "SELECT game_date FROM pitcher_game_logs ORDER BY game_date DESC LIMIT 1"
+        ).fetchone()
+        data_coverage["pitcher_game_logs"] = {
+            "total_rows": total,
+            "with_opponent_id": with_opp,
+            "pct_complete": round(with_opp / total * 100, 1) if total else 0,
+            "most_recent": recent_dates["game_date"] if recent_dates else None,
+        }
+
+    # team_game_logs: check coverage
+    if db_tables.get("team_game_logs", {}).get("rows", 0) > 0:
+        total = db_tables["team_game_logs"]["rows"]
+        recent_dates = conn.execute(
+            "SELECT game_date FROM team_game_logs ORDER BY game_date DESC LIMIT 1"
+        ).fetchone()
+        games_last_7 = conn.execute(
+            "SELECT COUNT(DISTINCT game_date) FROM team_game_logs WHERE game_date >= ?",
+            ((today - timedelta(days=7)).isoformat(),)
+        ).fetchone()[0]
+        data_coverage["team_game_logs"] = {
+            "total_rows": total,
+            "most_recent": recent_dates["game_date"] if recent_dates else None,
+            "game_dates_last_7d": games_last_7,
+        }
+
+    # analysis_log: agent score coverage
+    if db_tables.get("analysis_log", {}).get("rows", 0) > 0:
+        total = db_tables["analysis_log"]["rows"]
+        with_pitching = conn.execute(
+            "SELECT COUNT(*) FROM analysis_log WHERE score_pitching IS NOT NULL"
+        ).fetchone()[0]
+        graded = conn.execute(
+            "SELECT COUNT(*) FROM analysis_log WHERE ml_status != 'pending'"
+        ).fetchone()[0]
+        data_coverage["analysis_log"] = {
+            "total_rows": total,
+            "with_agent_scores": with_pitching,
+            "graded_rows": graded,
+        }
+
+    # picks: ev_score and odds coverage
+    if db_tables.get("picks", {}).get("rows", 0) > 0:
+        total = db_tables["picks"]["rows"]
+        with_ev = conn.execute(
+            "SELECT COUNT(*) FROM picks WHERE ev_score IS NOT NULL"
+        ).fetchone()[0]
+        with_odds = conn.execute(
+            "SELECT COUNT(*) FROM picks WHERE ml_odds IS NOT NULL OR ou_odds IS NOT NULL"
+        ).fetchone()[0]
+        with_kelly = conn.execute(
+            "SELECT COUNT(*) FROM picks WHERE kelly_fraction IS NOT NULL"
+        ) if "kelly_fraction" in db_tables.get("picks", {}).get("columns", []) else None
+        data_coverage["picks"] = {
+            "total_rows": total,
+            "with_ev_score": with_ev,
+            "with_odds": with_odds,
+        }
+
+    # opening_lines: coverage
+    if db_tables.get("opening_lines", {}).get("rows", 0) > 0:
+        total = db_tables["opening_lines"]["rows"]
+        data_coverage["opening_lines"] = {"total_rows": total}
+
+    conn.close()
+
+    # ── Data gaps: what stats could be collected but aren't ──
+    data_gaps = []
+
+    pitcher_rows = db_tables.get("pitcher_game_logs", {}).get("rows", 0)
+    team_rows = db_tables.get("team_game_logs", {}).get("rows", 0)
+
+    if pitcher_rows < 100:
+        data_gaps.append(
+            "pitcher_game_logs sparse — less than 100 starter rows; "
+            "rolling ERA blending mostly inactive"
+        )
+    if team_rows < 200:
+        data_gaps.append(
+            "team_game_logs sparse — rolling team R/G blending may be limited"
+        )
+
+    # Check if pitch-level metrics are missing (velocity, spin, etc.)
+    pitcher_cols = db_tables.get("pitcher_game_logs", {}).get("columns", [])
+    if "avg_velocity" not in pitcher_cols:
+        data_gaps.append(
+            "pitcher_game_logs missing velocity/spin columns — "
+            "pitch quality trends not tracked (TASK: pitcher_velocity_trends)"
+        )
+
+    # Check if batter-level logs exist
+    if "batter_game_logs" not in db_tables:
+        data_gaps.append(
+            "No batter_game_logs table — individual batter form/hot-cold streaks "
+            "not tracked; confirmed lineup scoring uses team avg only"
+        )
+
+    # Check if pitcher-vs-team matchup history exists
+    if "pitcher_vs_team_logs" not in db_tables:
+        data_gaps.append(
+            "No pitcher_vs_team_logs — historical SP ERA vs specific opponent "
+            "not tracked beyond rolling logs"
+        )
+
+    return {
+        "snapshot_date": today.isoformat(),
+        "file_summary": file_summary,
+        "db_tables": db_tables,
+        "data_coverage": data_coverage,
+        "data_gaps": data_gaps,
+    }
+
+
+def build_claude_context():
+    """
+    Build a self-contained context block to prepend to every Claude task prompt.
+
+    Includes current file structure, DB state, and what's already implemented
+    so Claude doesn't re-implement completed work or make stale assumptions.
+    """
+    snap = snapshot_pipeline()
+    today = snap["snapshot_date"]
+
+    # Read CLAUDE.md for authoritative current state
+    claude_md_path = PROJECT_ROOT / "CLAUDE.md"
+    claude_md = claude_md_path.read_text(errors="replace") if claude_md_path.exists() else ""
+
+    # Completed improvements
+    completed = sorted(get_completed_ids())
+
+    # DB summary
+    db_lines = []
+    for tname, info in snap["db_tables"].items():
+        db_lines.append(f"  {tname}: {info['rows']} rows | cols: {', '.join(info['columns'][:8])}{'...' if len(info['columns']) > 8 else ''}")
+
+    # Data gaps
+    gap_lines = "\n".join(f"  - {g}" for g in snap["data_gaps"]) if snap["data_gaps"] else "  None identified"
+
+    # File sizes
+    file_lines = []
+    for fname, lines in snap["file_summary"].items():
+        if lines is not None:
+            file_lines.append(f"  {fname}: {lines} lines")
+        else:
+            file_lines.append(f"  {fname}: MISSING")
+
+    context = f"""
+================================================================================
+OPTIMIZER CONTEXT — {today}
+This block is auto-generated. It gives you accurate current state so you don't
+re-implement completed work or make stale assumptions.
+================================================================================
+
+PROJECT ROOT: {PROJECT_ROOT}
+Python: 3.9 (no float|None union syntax — use Optional[float] or "float | None")
+
+FILE STRUCTURE:
+{chr(10).join(file_lines)}
+
+DATABASE TABLES (mlb_picks.db):
+{chr(10).join(db_lines)}
+
+DATA GAPS IDENTIFIED:
+{gap_lines}
+
+COMPLETED IMPROVEMENTS (never re-implement these):
+{', '.join(completed) if completed else 'none'}
+
+KEY ARCHITECTURE (from CLAUDE.md — read this carefully):
+{claude_md[:4000]}
+... (see CLAUDE.md for full reference)
+================================================================================
+END OPTIMIZER CONTEXT
+================================================================================
+
+"""
+    return context
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  ANALYSIS FUNCTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -332,6 +569,98 @@ def analyze_agent_signals(days=30):
     return result
 
 
+def analyze_rolling_data():
+    """
+    Report on pitcher_game_logs and team_game_logs coverage.
+
+    Returns stats the optimizer uses to:
+      - Detect stale data (collect_boxscores didn't run)
+      - Know how many pitchers have crossed blend thresholds
+      - Flag if rolling data is too sparse to be meaningful
+    """
+    conn = get_db()
+    today = date.today()
+    yesterday = (today - timedelta(days=1)).isoformat()
+    cutoff_21d = (today - timedelta(days=21)).isoformat()
+    cutoff_14d = (today - timedelta(days=14)).isoformat()
+
+    issues = []
+
+    # ── Pitcher game logs ──
+    total_pitcher_rows = conn.execute(
+        "SELECT COUNT(*) FROM pitcher_game_logs WHERE is_starter=1"
+    ).fetchone()[0]
+
+    yesterday_pitchers = conn.execute(
+        "SELECT COUNT(*) FROM pitcher_game_logs WHERE game_date=? AND is_starter=1",
+        (yesterday,)
+    ).fetchone()[0]
+
+    # How many starters have enough logs for blending (last 21 days)
+    blend_counts = conn.execute("""
+        SELECT pitcher_id, COUNT(*) as gs
+        FROM pitcher_game_logs
+        WHERE is_starter=1 AND game_date >= ?
+        GROUP BY pitcher_id
+    """, (cutoff_21d,)).fetchall()
+
+    pitchers_5plus  = sum(1 for r in blend_counts if r["gs"] >= 5)
+    pitchers_10plus = sum(1 for r in blend_counts if r["gs"] >= 10)
+    pitchers_20plus = sum(1 for r in blend_counts if r["gs"] >= 20)
+    total_starters  = len(blend_counts)
+
+    # ── Team game logs ──
+    total_team_rows = conn.execute(
+        "SELECT COUNT(*) FROM team_game_logs"
+    ).fetchone()[0]
+
+    yesterday_teams = conn.execute(
+        "SELECT COUNT(*) FROM team_game_logs WHERE game_date=?",
+        (yesterday,)
+    ).fetchone()[0]
+
+    # Teams with 5+ games in last 14 days (rolling R/G blend threshold)
+    team_blend_counts = conn.execute("""
+        SELECT team_id, COUNT(*) as games
+        FROM team_game_logs
+        WHERE game_date >= ?
+        GROUP BY team_id
+    """, (cutoff_14d,)).fetchall()
+
+    teams_5plus  = sum(1 for r in team_blend_counts if r["games"] >= 5)
+    teams_10plus = sum(1 for r in team_blend_counts if r["games"] >= 10)
+
+    conn.close()
+
+    # Flag stale data
+    if yesterday_pitchers == 0 and today.weekday() != 0:  # not Monday (off-day possible)
+        issues.append(
+            f"No pitcher_game_logs for {yesterday} — collect_boxscores may have failed"
+        )
+    if yesterday_teams == 0 and today.weekday() != 0:
+        issues.append(
+            f"No team_game_logs for {yesterday} — collect_boxscores may have failed"
+        )
+
+    return {
+        "pitcher_logs": {
+            "total_starter_rows": total_pitcher_rows,
+            "yesterday_starters": yesterday_pitchers,
+            "active_starters_21d": total_starters,
+            "blend_5plus": pitchers_5plus,   # 40% rolling blend active
+            "blend_10plus": pitchers_10plus,  # 60% rolling blend active
+            "blend_20plus": pitchers_20plus,  # 75% rolling blend active
+        },
+        "team_logs": {
+            "total_rows": total_team_rows,
+            "yesterday_teams": yesterday_teams,
+            "teams_5plus_14d": teams_5plus,   # rolling R/G blend active
+            "teams_10plus_14d": teams_10plus,
+        },
+        "issues": issues,
+    }
+
+
 def analyze_log_issues():
     """Scan engine.log for recurring errors and API fallback patterns."""
     if not LOG_PATH.exists():
@@ -481,15 +810,23 @@ def apply_threshold_tune(direction: str, current_win_rate: float) -> dict:
 def apply_via_claude(task_prompt: str) -> dict:
     """
     Dispatch a code improvement task to Claude Code CLI in non-interactive mode.
+    Prepends a full pipeline context block so Claude has accurate current state.
     Returns dict with success, output, and what changed (git diff summary).
     """
     if not Path(CLAUDE_BIN).exists():
         return {"success": False, "error": "claude CLI not found"}
 
     try:
+        context = build_claude_context()
+        full_prompt = context + task_prompt
+    except Exception as e:
+        print(f"[OPTIMIZER] Warning: could not build context ({e}) — using raw prompt")
+        full_prompt = task_prompt
+
+    try:
         result = subprocess.run(
             [
-                CLAUDE_BIN, "-p", task_prompt,
+                CLAUDE_BIN, "-p", full_prompt,
                 "--dangerously-skip-permissions",
                 "--model", "claude-sonnet-4-6",
             ],
@@ -524,360 +861,274 @@ def apply_via_claude(task_prompt: str) -> dict:
 #  Each prompt is self-contained — Claude needs no session context.
 # ─────────────────────────────────────────────────────────────────────────────
 
-TASK_ROLLING_TRENDS = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
-
-    TASK: Add rolling 7-day team performance stats to the momentum agent.
-
-    CURRENT STATE:
-    - analysis.py score_momentum() uses season win% and last-10-game record only
-    - data_mlb.py collect_game_data() fetches full season team stats
-    - Known limitation: season stats mask hot/cold streaks — documented in INSIGHTS.md
-
-    WHAT TO BUILD:
-    1. In data_mlb.py: add fetch_rolling_team_stats(team_id, days=7) that:
-       - Calls MLB Stats API schedule endpoint with startDate/endDate for last 7 days
-       - Returns: wins_last_7, losses_last_7, runs_scored_last_7, runs_allowed_last_7
-       - Endpoint: https://statsapi.mlb.com/api/v1/schedule?sportId=1&teamId={team_id}&startDate={start}&endDate={today}&hydrate=linescore
-       - Falls back gracefully to None if API fails
-
-    2. In data_mlb.py: call fetch_rolling_team_stats() for both home and away team inside collect_game_data(), attach as game_info["away_rolling"] and game_info["home_rolling"]
-
-    3. In analysis.py: update score_momentum() to incorporate rolling stats:
-       - If rolling data available: blend 60% season signal + 40% rolling-7 signal
-       - Rolling win% = wins_last_7 / max(wins_last_7 + losses_last_7, 1)
-       - Rolling run diff = (runs_scored - runs_allowed) / max(games, 1)
-       - Score contribution: (away_rolling_winpct - home_rolling_winpct) * 0.4 capped at ±0.25
-
-    4. In tests/: add test_rolling_trends.py with at least 3 tests:
-       - fetch_rolling_team_stats returns expected keys
-       - score_momentum uses rolling data when present
-       - score_momentum falls back gracefully when rolling is None
-
-    CONSTRAINTS:
-    - Do not change agent weights in config.py
-    - Do not break existing tests — run pytest after changes
-    - Keep fallback behavior: if rolling data unavailable, momentum scores exactly as before
-    - Commit all changes with message: "feat: add rolling 7-day team trends to momentum agent"
-
-    Run: pytest tests/ -v to verify before committing.
-""").strip()
-
-
-TASK_HOME_AWAY_SPLITS = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
-
-    TASK: Add home/away pitcher split ERA to the pitching agent.
-
-    CURRENT STATE:
-    - analysis.py score_pitching() uses season ERA from pitcher_stats dict
-    - data_mlb.py fetch_pitcher_stats() fetches season totals only
-    - Known limitation documented in INSIGHTS.md: "Home/away pitcher splits not fetched — model uses season ERA only"
-
-    WHAT TO BUILD:
-    1. In data_mlb.py: add fetch_pitcher_splits(pitcher_id) that:
-       - Calls: https://statsapi.mlb.com/api/v1/people/{pitcher_id}/stats?stats=statSplits&group=pitching&sitCodes=h,a&season=2026
-       - Returns: {"home_era": float_or_none, "away_era": float_or_none}
-       - Falls back to None/None on any error or missing data
-
-    2. In data_mlb.py: call fetch_pitcher_splits() for home and away starter inside collect_game_data().
-       Attach as: game_info["home_pitcher_splits"] and game_info["away_pitcher_splits"]
-
-    3. In analysis.py: update score_pitching() to use split ERA when available:
-       - If pitcher is home: prefer home_era over season_era (home ERA more relevant)
-       - If pitcher is away: prefer away_era over season_era
-       - Blend: 70% split ERA + 30% season ERA when split available
-       - Fall back to season ERA if split is None
-
-    4. In tests/: add test_pitcher_splits.py with at least 3 tests:
-       - fetch_pitcher_splits returns correct keys
-       - score_pitching blends split ERA correctly when available
-       - score_pitching uses season ERA when splits are None
-
-    CONSTRAINTS:
-    - Do not change weights or thresholds
-    - Do not break existing tests — run pytest after changes
-    - Commit: "feat: add home/away pitcher ERA splits to pitching agent"
-
-    Run: pytest tests/ -v to verify before committing.
-""").strip()
-
-
-TASK_LINE_MOVEMENT = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
-
-    TASK: Track opening line vs current line as a market signal.
-
-    CURRENT STATE:
-    - data_odds.py fetches current consensus ML/RL/total lines
-    - database.py picks table has no opening line storage
-    - Known limitation: "Line movement tracking (opening vs current) not stored"
-    - Market agent uses model prob vs implied prob but ignores line movement direction
-
-    WHAT TO BUILD:
-    1. In database.py: add columns to picks table (ALTER TABLE if not exists):
-       - opening_ml_away INTEGER, opening_ml_home INTEGER, opening_total REAL
-
-    2. In data_odds.py: add fetch_opening_lines(home_team, away_team) that:
-       - Fetches from The Odds API with the same key as current odds
-       - Looks for the earliest (lowest last_update timestamp) bookmaker entry as proxy for opening
-       - Returns {"opening_ml_away": int_or_none, "opening_ml_home": int_or_none, "opening_total": float_or_none}
-       - Falls back to None values on any error
-
-    3. In engine.py run_analysis(): after match_odds_to_game(), call fetch_opening_lines() and store in pick_record before save_pick()
-
-    4. In analysis.py market agent (score_market()):
-       - If opening_total and current_total differ by ≥0.5: treat as sharp money signal
-       - Total moved up → more runs expected → slight over lean (+0.05)
-       - Total moved down → fewer runs expected → slight under lean (+0.05 for under)
-       - If opening_ml and current_ml differ by ≥10 points: sharp line movement signal (+0.03)
-
-    5. Add opening line to Discord alerts in discord_bot.py — one extra line under Current Odds:
-       "- Line move: Total {opening} → {current}" (only when movement ≥ 0.5)
-
-    CONSTRAINTS:
-    - Do not break existing tests
-    - Run pytest tests/ -v after changes
-    - Commit: "feat: track opening line movement as market signal"
-""").strip()
-
-
-TASK_UMPIRE_EXPANSION = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
-
-    TASK: Expand the umpire tendencies table in config.py from 14 to ~40 MLB umpires.
-
-    CURRENT STATE:
-    - config.py UMPIRE_TENDENCIES has 14 extreme umps
-    - Most games use unknown umps → default to neutral (0.0) even when data exists
-    - Source note: "UmpScorecards multi-year averages"
-
-    WHAT TO BUILD:
-    Add the following umpires to UMPIRE_TENDENCIES in config.py based on well-documented
-    UmpScorecards data (use your training knowledge of ump tendencies through 2024 season).
-    Format: {"run_factor": float, "k_factor": float}
-    - run_factor range: -0.10 to +0.10 (neutral = 0.0)
-    - k_factor range: -0.08 to +0.08 (neutral = 0.0)
-
-    Add at minimum these known umps (use reasonable estimates from UmpScorecards patterns):
-    Gabe Morales, Phil Cuzzi, Marvin Hudson, Greg Gibson, Vic Carapazza,
-    Bill Miller, Jim Reynolds, Alfonso Marquez, Sean Barber, Brian O'Nora,
-    Doug Eddings, Tripp Gibson, Jeremie Rehak, Ben May, Stu Scheurwater,
-    Ryan Additon, Nick Mahrley, Junior Valentine, Nestor Ceja, Brennan Miller,
-    Chris Segal, Brian Knight, Hunter Wendelstedt, Joe West (retired 2022 but may appear),
-    Tom Hallion, Larry Vanover, Sam Holbrook, Ted Barrett, Mark Carlson, Mark Wegner
-
-    For each: neutral (0.0) is acceptable for umps with no strong documented tendency.
-    Only add non-zero values for umps with clear documented bias.
-
-    CONSTRAINTS:
-    - Only modify config.py UMPIRE_TENDENCIES dict
-    - Do not change any weights, thresholds, or other config values
-    - Commit: "feat: expand umpire tendencies table to ~40 MLB umps"
-""").strip()
-
-
-TASK_DATA_QUALITY_FIX = textwrap.dedent("""
+TASK_API_ERROR_HANDLING = textwrap.dedent("""
     You are fixing a data quality issue in the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
 
-    TASK: Improve API error handling and reduce fallback rate.
-
-    Review engine.log and the following files for recurring errors:
-    - data_mlb.py (MLB Stats API + Statcast fetches)
-    - data_odds.py (The Odds API)
-
-    For each function that makes an external API call:
-    1. Ensure it has a try/except with specific error logging (not silent failures)
-    2. Add retry logic (max 2 retries, 2s delay) for timeout errors only
-    3. Log a clear WARNING when falling back to defaults so we can track it
-
-    Do not change business logic — only improve error handling robustness.
-    Run: pytest tests/ -v after changes.
-    Commit: "fix: improve API error handling and retry logic"
-""").strip()
-
-
-TASK_EV_GATE = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
-
-    TASK: Add Expected Value (EV) gate to the pick approval filter.
+    TASK: Add retry logic and structured error logging to all external API calls.
 
     CURRENT STATE:
-    - analysis.py risk_filter() approves picks at confidence >= MIN_CONFIDENCE (7) and edge_score >= MIN_EDGE_SCORE (0.12)
-    - A pick at conf 7 with -200 ML odds requires 67% win rate just to break even — but still gets approved
-    - Picks already have ml_win_probability (model's estimated win%) and odds data from the market agent
+    - data_mlb.py and data_odds.py make external API calls with basic try/except but no retry
+    - engine.log shows recurring "Error fetching travel context: fromisoformat: argument must be str" for all 15 teams — this fires every run and is never retried
+    - Some failures fall back silently (no WARNING logged) making it hard to diagnose
+    - The travel context error is a date parsing bug: fetch_travel_context() receives game_date as a non-string (likely a date object) and calls fromisoformat() on it
 
-    WHAT TO BUILD:
-    1. In analysis.py risk_filter(): after existing confidence/edge checks, add EV check for moneyline picks:
-       - Extract implied win probability from the pick's ML odds (already available via market agent detail)
-       - Calculate EV = (win_prob * payout_on_win) - (loss_prob * stake)
-         where payout_on_win = 100/abs(odds) if odds < 0, else odds/100
-       - Require EV >= -0.02 (allow slightly negative EV for high-confidence plays, reject clearly -EV)
-       - For O/U picks: use over_price/under_price from market agent detail
+    WHAT TO FIX:
+    1. Fix the travel context bug in data_mlb.py fetch_travel_context():
+       - The function calls fromisoformat() on game_date — guard with str(game_date) before parsing
+       - This is causing the repeated error for all 15 teams every run
 
-    2. When a pick is rejected by EV gate (passes conf/edge but fails EV):
-       - Log it: print(f"[EV GATE] Rejected {pick_team} — conf {conf} but EV {ev:.3f} at {odds}")
-       - Include it in the watchlist with reason "High confidence but poor odds value (EV: {ev:.3f})"
-       - Do NOT send to Discord
+    2. For functions that call external APIs (MLB Stats API, Statcast, Open-Meteo, The Odds API):
+       - Add retry logic (max 2 retries, 2s delay) for ConnectionError and Timeout only
+       - On final failure after retries: log [WARNING] with function name and error
+       - Keep existing fallback return values (None, {}, []) — just add the warning log
 
-    3. Add "EV" line to Discord pick alerts in discord_bot.py:
-       - Under confidence line: "**Expected Value:** {ev:+.3f} ({win_prob}% model vs {implied_prob}% market)"
-
-    4. Store ev_score in pick_record in engine.py and add ev_score column to picks table in database.py
+    3. Do not change business logic, agent scoring, or return value shapes.
 
     CONSTRAINTS:
-    - MIN_EV = -0.02 (loose gate — don't over-restrict)
-    - Falls back gracefully if odds not available (skip EV check, approve on conf/edge alone)
-    - Run: pytest tests/ -v after changes
-    - Commit: "feat: add expected value gate to pick approval filter"
+    - Run: pytest tests/ -v after changes — all existing tests must pass
+    - Commit: "fix: add API retry logic and fix travel context date parsing bug"
 """).strip()
 
 
-TASK_PITCHER_SCRATCH_MONITOR = textwrap.dedent("""
+TASK_CORRELATED_PICK_CAP = textwrap.dedent("""
     You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
 
-    TASK: Add a lightweight pitcher scratch / lineup change monitor.
+    TASK: Add a correlated pick cap — prevent sending both ML and O/U picks for the same game.
 
     CURRENT STATE:
-    - engine.py --refresh runs at 11am/1pm/3pm/5pm — 2-4 hour gaps where a pitcher scratch goes undetected
-    - If a SP is scratched after the 8am pick was sent, we have an active pick on a game with a different pitcher
-    - database.py picks table has mlb_game_id (via games table), away_pitcher, home_pitcher fields
+    - analysis.py risk_filter() can approve both a moneyline pick AND an over/under pick for the same game
+    - Also possible: both ML and F5 ML for same game
+    - These are highly correlated bets — if the ML pick wins, the O/U result is already partially determined by the same factors
+    - Sending both picks inflates apparent pick count and creates correlated risk exposure
+    - MAX_PICKS_PER_DAY = 5 in config.py; correlated picks should count as 1.5 slots
 
-    WHAT TO BUILD: New file `monitor.py`
+    WHAT TO BUILD:
+    1. In analysis.py risk_filter(): after the existing confidence/edge/EV gates:
+       - Sort approved picks by confidence descending (already done)
+       - When selecting picks to send (up to MAX_PICKS_PER_DAY=5):
+         * If a game already has an approved ML pick, a same-game O/U is allowed but counts as 0.5 extra slots
+         * If a game already has an approved ML pick, a same-game F5 ML is NOT added (too correlated)
+         * Maximum 1 F5 pick total per day (already implied by pitching_score threshold, but enforce explicitly)
+       - Log when a pick is dropped due to correlation: "[CORR CAP] Skipped {pick} — correlated with {existing}"
 
-    1. `run_monitor()`:
-       - Load today's sent picks from DB (discord_sent=1, status='pending')
-       - For each pick, fetch the current probable pitcher for that game from MLB Stats API
-         Endpoint: https://statsapi.mlb.com/api/v1/schedule?gamePks={mlb_game_id}&hydrate=probablePitcher
-       - Compare to the pitcher name stored when the pick was sent (from analysis_log or picks table)
-       - If pitcher changed: send Discord alert immediately
-         Format: "⚠️ **PITCHER SCRATCH ALERT** — {game}\nOriginal pick based on {old_pitcher}.\nNew probable: {new_pitcher}. Consider revisiting this pick."
-       - Do not send duplicate alerts for the same game (track in a daily scratch_alerts table)
+    2. In config.py: add ALLOW_SAME_GAME_OU = True (lets operator toggle whether same-game O/U is allowed alongside ML)
 
-    2. `main()`: call run_monitor(), log output
+    3. No Discord format changes needed.
 
-    3. Add scratch_alerts table to database.py:
-       CREATE TABLE IF NOT EXISTS scratch_alerts (
+    CONSTRAINTS:
+    - If ALLOW_SAME_GAME_OU = True (default): ML + O/U same game is allowed but counts as 1.5 slots toward MAX_PICKS
+    - F5 + ML same game: always blocked (too correlated)
+    - Run: pytest tests/ -v after changes; add at least 2 tests for the cap logic
+    - Commit: "feat: add correlated pick cap — prevent same-game ML+F5, cap ML+OU"
+""").strip()
+
+
+TASK_PITCHER_VELOCITY_TRENDS = textwrap.dedent("""
+    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
+
+    TASK: Add pitcher velocity trend signal to the pitching agent.
+
+    CURRENT STATE:
+    - analysis.py score_pitching() uses ERA/WHIP/K9/BB9 and opponent-adjusted rolling ERA
+    - No signal for whether a pitcher's stuff is trending up or down within the season
+    - Baseball Savant already provides pitcher-level Statcast data (xERA endpoint already fetched)
+    - pitcher_game_logs table has per-start data: IP, ER, K, BB, H, HR
+
+    WHAT TO BUILD:
+    1. In database.py: add get_pitcher_velocity_trend(pitcher_id, days=21) that:
+       - Queries pitcher_game_logs for last N days (is_starter=1)
+       - Computes K/9 trend: avg K/9 in last 2 starts vs avg K/9 in starts 3-5 prior
+       - Returns: {"k9_trend": float, "recent_k9": float, "prior_k9": float, "starts": int}
+         k9_trend > 0 = improving velo/stuff; < 0 = declining
+       - Returns None if fewer than 4 starts available
+
+    2. In analysis.py score_pitching(): incorporate velocity trend when available:
+       - k9_trend >= +1.5 (K/9 up by 1.5+): small bonus +0.04 for that pitcher
+       - k9_trend <= -1.5 (K/9 down by 1.5+): small penalty -0.04
+       - Applied symmetrically to home/away SP
+       - Include in edge string: "SP K/9 trend: +1.8 (improving)" when triggered
+
+    3. In data_mlb.py collect_game_data(): call get_pitcher_velocity_trend() for both starters,
+       attach as game_info["away_pitcher_trend"] and game_info["home_pitcher_trend"]
+
+    4. In tests/: add at least 3 tests:
+       - get_pitcher_velocity_trend returns correct keys and computes trend correctly
+       - Returns None with fewer than 4 starts
+       - score_pitching applies bonus/penalty correctly
+
+    CONSTRAINTS:
+    - Requires pitcher_game_logs data — graceful None return when insufficient data
+    - Do not change agent weights in config.py
+    - Run: pytest tests/ -v after changes
+    - Commit: "feat: add pitcher K/9 velocity trend signal to pitching agent"
+""").strip()
+
+
+TASK_BATTER_GAME_LOGS = textwrap.dedent("""
+    TASK: Add per-batter game logs table and hot/cold streak signal to the offense agent.
+
+    WHY: The offense agent currently uses team-level season OPS/OBP/SLG and team rolling R/G.
+    It has no visibility into individual batter form. A team with 3 hot bats in the lineup
+    is meaningfully different from the same team mid-slump, even if season averages look identical.
+    The confirmed lineup scoring adjusts for lineup OPS vs team avg but has no recency signal.
+
+    WHAT TO BUILD:
+
+    1. In database.py: add batter_game_logs table:
+       CREATE TABLE IF NOT EXISTS batter_game_logs (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
-           game_date TEXT,
            mlb_game_id INTEGER,
-           old_pitcher TEXT,
-           new_pitcher TEXT,
-           alerted_at TEXT,
-           UNIQUE(game_date, mlb_game_id)
+           game_date TEXT,
+           batter_id INTEGER,
+           batter_name TEXT,
+           team_id INTEGER,
+           at_bats INTEGER,
+           hits INTEGER,
+           doubles INTEGER,
+           triples INTEGER,
+           home_runs INTEGER,
+           rbi INTEGER,
+           walks INTEGER,
+           strikeouts INTEGER,
+           created_at TEXT,
+           UNIQUE(mlb_game_id, batter_id)
        )
+       Add index: idx_batter_logs_batter ON batter_game_logs(batter_id, game_date)
+       Add index: idx_batter_logs_team ON batter_game_logs(team_id, game_date)
 
-    4. Add `monitor.sh` wrapper (same pattern as run.sh):
-       #!/bin/bash
-       cd "$(dirname "$0")"
-       /usr/bin/python3 monitor.py >> engine.log 2>&1
+    2. In database.py: add collect_batter_boxscores(game_date) that:
+       - Calls /game/{gamePk}/boxscore for each completed game on game_date (same endpoint as pitcher logs)
+       - Parses teams.{side}.batters + teams.{side}.players[id].stats.batting
+       - Extracts: atBats, hits, doubles, triples, homeRuns, rbi, baseOnBalls, strikeOuts
+       - Skips pitchers (is_starter or IP > 0) — batters only
+       - INSERT OR IGNORE (idempotent)
+       - Returns count of rows inserted
 
-    DO NOT create a launchd plist — that will be done separately.
-    Run: pytest tests/ -v after changes (add at least 2 tests for monitor.py).
-    Commit: "feat: add pitcher scratch monitor with Discord alerts"
-""").strip()
+    3. In database.py: add get_team_batter_hot_cold(team_id, days=10):
+       - Queries batter_game_logs for team's batters in last N days
+       - For each batter with >= 3 at_bats total in window: compute BA and OPS proxy
+       - "Hot" batter: BA >= .320 in last 10d with >= 12 AB
+       - "Cold" batter: BA <= .180 in last 10d with >= 12 AB
+       - Returns: {"hot_count": int, "cold_count": int, "avg_ba_10d": float, "sample_abs": int}
+       - Returns None if fewer than 30 total AB in window
 
+    4. In engine.py: call collect_batter_boxscores(today) at end of --results run
+       (same place collect_boxscores is called for pitchers)
 
-TASK_WEATHER_TIMING = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
+    5. In analysis.py score_offense(): incorporate hot/cold signal when available:
+       - Call get_team_batter_hot_cold() for both teams
+       - hot_count - cold_count >= 2: slight bonus +0.04 for that team's offense
+       - cold_count - hot_count >= 2: slight penalty -0.04
+       - Include in edge string: "3 batters hot (last 10d)" when triggered
+       - Graceful fallback: if None, score_offense unchanged
 
-    TASK: Fetch weather at the actual game start time instead of at analysis time.
-
-    CURRENT STATE:
-    - data_mlb.py fetch_weather() fetches current weather conditions at analysis time (8am)
-    - Games start anywhere from 12pm to 10pm ET — weather can shift significantly
-    - game_time_utc is already stored in game_info dict (from g["gameDate"])
-    - Open-Meteo API supports hourly forecasts: add `hourly=temperature_2m,wind_speed_10m,wind_direction_10m,precipitation_probability` to the request
-
-    WHAT TO BUILD:
-    1. In data_mlb.py fetch_weather(): change from current conditions to hourly forecast:
-       - Current URL: https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true
-       - New URL: https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,precipitation_probability&timezone=auto&forecast_days=1
-       - Parse game_time_utc to get the target hour (convert UTC → local via timezone parameter)
-       - Extract the forecast values for the matching hour index
-       - Fall back to current conditions if game_time_utc is empty or parsing fails
-
-    2. Update the weather dict keys to clarify it's a forecast:
-       - Add "forecast_for": game_time_str (human-readable) to the returned dict
-
-    3. No changes needed to analysis.py or discord_bot.py — same weather dict keys
-
-    CONSTRAINTS:
-    - Fallback to current conditions if game_time_utc missing or API response malformed
-    - Run: pytest tests/ -v after changes
-    - Commit: "feat: fetch weather at game-specific start time using hourly forecast"
-""").strip()
-
-
-TASK_ROI_TRACKING = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
-
-    TASK: Store actual odds at send time and calculate true ROI in --status output.
-
-    CURRENT STATE:
-    - Picks are sent to Discord with ML odds in the message but odds are NOT stored in the picks table
-    - database.py picks table has no odds columns
-    - --status shows W/L/P win rate but not actual ROI% (win rate at bad odds loses money)
-    - discord_bot.py _format_pick_message() already formats odds — the raw values are in the pick dict
-
-    WHAT TO BUILD:
-    1. In database.py: add columns to picks table (ALTER TABLE IF NOT EXISTS pattern):
-       - ml_odds INTEGER  (American odds, e.g. -150 or +130)
-       - ou_odds INTEGER  (over or under price, whichever applies)
-
-    2. In engine.py run_analysis(): extract odds from pick dict and include in pick_record:
-       - For ML picks: ml_odds = market agent away_ml or home_ml depending on pick_team
-       - For O/U picks: ou_odds = over_price or under_price depending on pick_type
-       - These values are already in the pick dict via market agent detail
-
-    3. In database.py get_roi_summary(): calculate true ROI:
-       - For each graded pick with ml_odds stored:
-         * Won: profit = 100/abs(odds) if odds < 0, else odds/100 (per 1 unit)
-         * Lost: profit = -1.0
-       - Sum profit / total picks = ROI per unit
-       - Return roi_per_unit and total_units_profit alongside existing fields
-
-    4. In engine.py _print_snapshot(): update PICKS SENT line to show:
-       "PICKS SENT:  5W - 2L - 0P  (71.4% win rate)  +1.23 units  [7 graded]"
+    6. In tests/: add test_batter_logs.py with at least 4 tests:
+       - batter_game_logs table created by init_db
+       - collect_batter_boxscores parses boxscore correctly (mock API response)
+       - get_team_batter_hot_cold returns correct keys
+       - get_team_batter_hot_cold returns None with insufficient data
 
     CONSTRAINTS:
-    - Backward compatible: picks without odds stored show N/A for ROI, don't crash
+    - collect_batter_boxscores uses same /game/{gamePk}/boxscore endpoint already used by collect_boxscores — do not add a new API endpoint
+    - Batters only: skip any player with pitching stats (check players[id].stats.pitching)
+    - Do not change agent weights or thresholds
     - Run: pytest tests/ -v after changes
-    - Commit: "feat: store send-time odds and calculate true unit ROI in --status"
+    - Commit: "feat: add batter game logs and hot/cold streak signal to offense agent"
 """).strip()
 
 
-TASK_TRAVEL_FATIGUE = textwrap.dedent("""
-    You are implementing one improvement to the MLB picks engine at /Users/marc/Projects/Claude/Projects/Shenron/mlb-picks-engine/.
+TASK_PITCHER_VS_TEAM = textwrap.dedent("""
+    TASK: Track pitcher historical performance vs specific opponents and use it in the pitching agent.
 
-    TASK: Add travel fatigue signal to the momentum agent.
-
-    CURRENT STATE:
-    - analysis.py score_momentum() uses win streaks and last-10 record only
-    - No signal for road trip length, timezone changes, or back-to-back games
-    - MLB teams play 162 games — fatigue from long road trips is a measurable signal
+    WHY: The pitching agent uses season ERA, home/away splits, and opponent-adjusted rolling ERA.
+    But it has no record of how a specific SP performs against a specific team historically.
+    Some pitchers consistently dominate certain lineups; others struggle against specific teams
+    regardless of their season ERA. This matchup history is a meaningful independent signal.
 
     WHAT TO BUILD:
-    1. In data_mlb.py: add fetch_travel_context(team_id, game_date) that:
-       - Fetches last 7 days of schedule for the team
-         Endpoint: https://statsapi.mlb.com/api/v1/schedule?teamId={team_id}&startDate={7d_ago}&endDate={today}&sportId=1
+
+    1. In database.py: the pitcher_game_logs table already has opponent_team_id.
+       Add get_pitcher_vs_team_history(pitcher_id, opponent_team_id, days=365):
+       - Queries pitcher_game_logs WHERE pitcher_id=? AND opponent_team_id=? AND game_date >= ?
+       - Requires >= 2 starts vs this opponent in window
+       - Returns: {"starts": int, "era_vs_team": float, "whip_vs_team": float,
+                   "k9_vs_team": float, "avg_ip": float}
+         era_vs_team = (earned_runs * 9) / max(innings_pitched, 0.1)
+         whip_vs_team = (hits + walks) / max(innings_pitched, 0.1)
+         k9_vs_team = strikeouts * 9 / max(innings_pitched, 0.1)
+       - Returns None if fewer than 2 starts
+
+    2. In analysis.py score_pitching(): incorporate matchup history when available:
+       - Call get_pitcher_vs_team_history() for away SP vs home team, home SP vs away team
+       - Compare era_vs_team to pitcher's rolling ERA:
+         era_vs_team < (rolling_era - 0.75): SP historically dominates this lineup → +0.06
+         era_vs_team > (rolling_era + 0.75): SP historically struggles vs this lineup → -0.06
+       - Include in edge string: "SP ERA vs this team (3 starts): 1.42 — dominates" when triggered
+       - Graceful fallback: if None (too few starts), no adjustment
+
+    3. In data_mlb.py collect_game_data(): add opponent team IDs so analysis.py can call
+       get_pitcher_vs_team_history. The game dict already has away_team_id and home_team_id
+       as integer MLB team IDs in g["away_team_id"] / g["home_team_id"] — use these directly.
+       No new API calls needed.
+
+    4. In tests/: add test_pitcher_vs_team.py with at least 3 tests:
+       - get_pitcher_vs_team_history computes ERA/WHIP/K9 correctly from mock logs
+       - Returns None with fewer than 2 starts
+       - score_pitching applies bonus/penalty correctly
+
+    CONSTRAINTS:
+    - No new tables — uses existing pitcher_game_logs with opponent_team_id column
+    - No new API calls — data already collected nightly via collect_boxscores
+    - Do not change agent weights or thresholds
+    - Run: pytest tests/ -v after changes
+    - Commit: "feat: add pitcher-vs-team matchup history to pitching agent"
+""").strip()
+
+
+TASK_TEAM_SITUATIONAL_STATS = textwrap.dedent("""
+    TASK: Add situational team stats (home/away splits, day/night, last 7 days) to the offense and momentum agents.
+
+    WHY: The team_game_logs table accumulates per-game team batting stats (R, H, HR, K, BB, AB).
+    Currently only rolling R/G is used. But team_game_logs enables richer situational splits
+    that are directly relevant to today's game: how does this team hit at home vs away?
+    How are they performing specifically in the last 7 days vs last 30?
+
+    WHAT TO BUILD:
+
+    1. In database.py: add get_team_situational_stats(team_id, is_away, days_recent=7, days_season=60):
+       - Queries team_game_logs for team_id
        - Returns:
-         * consecutive_road_games: int (how many consecutive away games including today)
-         * timezone_changes_last_5d: int (count of games in different timezone from today's game)
-         * days_since_off_day: int
-       - Falls back to None on error
+         * recent_rpg: avg runs/game in last days_recent days (is_away matches today's role)
+         * recent_ops_proxy: (hits + walks) / at_bats for last days_recent days (OBP proxy)
+         * recent_k_rate: strikeouts / at_bats for last days_recent days
+         * home_away_rpg: avg runs/game in home or away games over last days_season days
+         * recent_games: count of games in recent window
+       - Returns None if fewer than 3 games in recent window
 
-    2. In analysis.py score_momentum(): apply travel penalty when context available:
-       - consecutive_road_games >= 5: -0.04 penalty
-       - timezone_changes_last_5d >= 2 (e.g. east coast team playing west coast): -0.05 penalty
-       - Stack: max combined penalty -0.08
-       - Applied to away team only (home team has no travel penalty)
-       - Include in edge summary if penalty > 0: "Away team on extended road trip ({n} games)"
+    2. In analysis.py score_offense(): update to use situational stats:
+       - Call get_team_situational_stats(team_id, is_away=True/False) for both teams
+       - Replace or blend rolling R/G (currently from get_team_rolling_stats) with situational recent_rpg
+       - Use home_away_rpg as the primary rolling signal (more relevant than overall rolling R/G):
+         blend = 0.5 * season_rpg + 0.3 * home_away_rpg + 0.2 * recent_rpg
+       - High recent_k_rate (>= 0.27): slight penalty -0.03 (team struggling to make contact)
+       - Graceful fallback: if None, use existing rolling R/G logic unchanged
+
+    3. In analysis.py score_momentum(): use recent_rpg as a momentum signal:
+       - If recent_rpg significantly above season_rpg (>= +0.8 runs/game over 7d): small hot streak bonus +0.04
+       - If significantly below (<= -0.8 runs/game over 7d): small cold streak penalty -0.04
+       - This supplements the existing win streak signal
+
+    4. In tests/: add test_situational_stats.py with at least 3 tests:
+       - get_team_situational_stats returns correct averages from mock data
+       - Returns None with fewer than 3 games
+       - score_offense applies home_away_rpg blend correctly
 
     CONSTRAINTS:
-    - Graceful fallback: if fetch_travel_context fails, momentum scores exactly as before
+    - Uses existing team_game_logs — no new tables or API calls
+    - Requires team_game_logs to be populated (fails gracefully if sparse)
+    - Do not change agent weights or thresholds
     - Run: pytest tests/ -v after changes
-    - Commit: "feat: add travel fatigue signal to momentum agent"
+    - Commit: "feat: add team situational stats from game logs to offense and momentum agents"
 """).strip()
 
 
@@ -886,23 +1137,33 @@ TASK_TRAVEL_FATIGUE = textwrap.dedent("""
 # ─────────────────────────────────────────────────────────────────────────────
 
 def select_improvement(perf, model, log_issues, signal):
-    """Return the highest-priority actionable improvement."""
+    """
+    Return the highest-priority actionable improvement.
+
+    Runs nightly. Config changes (weights/thresholds) re-evaluate daily but
+    are throttled to once per 7 days so the system can measure each change.
+    Code changes (Claude CLI) are also throttled to once per 7 days.
+    Data analysis and Discord reporting always happen regardless.
+    """
     completed = get_completed_ids()
     graded = perf["total"] if perf else 0
+    days_since_action = _days_since_last_optimizer_commit()
 
-    # 1. Data quality — always highest priority
-    if log_issues["issues"] and "data_quality" not in completed:
-        return {
-            "id": "data_quality",
-            "name": "API Error Handling & Retry Logic",
-            "description": "Reduce fallback rate by adding retries and structured error logging",
-            "type": "claude",
-            "task": TASK_DATA_QUALITY_FIX,
-            "priority_reason": f"Log issues: {'; '.join(log_issues['issues'][:2])}",
-        }
+    # 1. Data quality — always highest priority, but still respect code throttle
+    if log_issues["issues"] and "api_error_handling" not in completed:
+        if days_since_action >= 7:
+            return {
+                "id": "api_error_handling",
+                "name": "API Error Handling & Retry Logic",
+                "description": "Reduce fallback rate by adding retries and fixing travel context date parsing bug",
+                "type": "claude",
+                "task": TASK_API_ERROR_HANDLING,
+                "priority_reason": f"Log issues: {'; '.join(log_issues['issues'][:2])}",
+            }
 
-    # 2. Weight rebalance — need 20+ graded picks with meaningful signal
-    if graded >= 20 and signal and "weight_rebalance" not in completed:
+    # 2. Weight rebalance — need 20+ graded picks, strong signal, and 7-day cooldown
+    # No one-shot completed guard — weights should re-evaluate as live data accumulates
+    if graded >= 20 and signal and days_since_action >= 7:
         best = max(signal.items(), key=lambda x: abs(x[1]["differential"]))
         agent, sig = best
         if abs(sig["differential"]) > 0.05:
@@ -919,9 +1180,10 @@ def select_improvement(perf, model, log_issues, signal):
                 "priority_reason": f"{graded} graded picks, {agent} differential {sig['differential']:+.4f}",
             }
 
-    # 3. Threshold tuning — need 30+ graded picks
-    if graded >= 30 and perf:
-        if perf["win_rate"] < 50.0 and "threshold_up" not in completed:
+    # 3. Threshold tuning — need 30+ graded picks and 7-day cooldown
+    # No one-shot completed guard — thresholds should re-evaluate as data grows
+    if graded >= 30 and perf and days_since_action >= 7:
+        if perf["win_rate"] < 50.0:
             return {
                 "id": "threshold_up",
                 "name": "Raise Confidence Threshold",
@@ -937,7 +1199,7 @@ def select_improvement(perf, model, log_issues, signal):
         c7_total = conf7.get("correct", 0) + conf7.get("incorrect", 0)
         if c7_total >= 10:
             c7_rate = conf7.get("correct", 0) / c7_total
-            if c7_rate >= 0.65 and "threshold_down" not in completed:
+            if c7_rate >= 0.65:
                 return {
                     "id": "threshold_down",
                     "name": "Lower Confidence Threshold",
@@ -948,26 +1210,35 @@ def select_improvement(perf, model, log_issues, signal):
                     "priority_reason": f"Conf 7 hitting {c7_rate*100:.0f}% over {c7_total} picks — well above 52% target",
                 }
 
-    # 4. Ordered code improvements — one per week, never repeat
-    # Ordered by estimated impact on pick quality
+    # 4. Ordered code improvements — one per 7-day window, never repeat
     code_queue = [
-        # Tier 0: Quick wins (config, data coverage)
-        ("umpire_expansion",        "Expand Umpire Tendencies Table",          TASK_UMPIRE_EXPANSION),
-        # Tier 1: High impact — pick quality / error prevention
-        ("ev_gate",                 "Add Expected Value Gate",                 TASK_EV_GATE),
-        ("pitcher_scratch_monitor", "Add Pitcher Scratch Monitor",             TASK_PITCHER_SCRATCH_MONITOR),
-        ("roi_tracking",            "Store Odds & Track True ROI",             TASK_ROI_TRACKING),
-        # Tier 2: Signal improvements
-        ("weather_timing",          "Weather at Game-Specific Start Time",     TASK_WEATHER_TIMING),
-        ("rolling_trends",          "Add Rolling 7-Day Team Trends",           TASK_ROLLING_TRENDS),
-        ("home_away_splits",        "Add Home/Away Pitcher Splits",            TASK_HOME_AWAY_SPLITS),
-        ("travel_fatigue",          "Add Travel Fatigue Signal",               TASK_TRAVEL_FATIGUE),
-        # Tier 3: Market / structural
-        ("line_movement",           "Track Opening Line Movement",             TASK_LINE_MOVEMENT),
+        # Structural / risk management
+        ("api_error_handling",        "API Error Handling & Retry Logic",         TASK_API_ERROR_HANDLING),
+        ("correlated_pick_cap",       "Correlated Pick Cap",                      TASK_CORRELATED_PICK_CAP),
+        # Per-game data collection → smarter picks over time
+        ("batter_game_logs",          "Batter Game Logs & Hot/Cold Streaks",      TASK_BATTER_GAME_LOGS),
+        ("pitcher_vs_team",           "Pitcher vs Team Matchup History",          TASK_PITCHER_VS_TEAM),
+        ("team_situational_stats",    "Team Situational Stats (Home/Away/Recent)", TASK_TEAM_SITUATIONAL_STATS),
+        # Signal improvements (require sufficient game log data first)
+        ("pitcher_velocity_trends",   "Pitcher Velocity Trend Signal",            TASK_PITCHER_VELOCITY_TRENDS),
     ]
 
     for imp_id, imp_name, task in code_queue:
         if imp_id not in completed:
+            if days_since_action < 7:
+                return {
+                    "id": "cooldown",
+                    "name": "Cooldown — Code Change Throttle",
+                    "description": (
+                        f"Next queued improvement is '{imp_name}', but a code change "
+                        f"was applied {days_since_action}d ago. Waiting for 7-day window."
+                    ),
+                    "type": "report_only",
+                    "priority_reason": (
+                        f"Code throttle: last change {days_since_action}d ago "
+                        f"(need 7d gap to measure impact)"
+                    ),
+                }
             return {
                 "id": imp_id,
                 "name": imp_name,
@@ -981,7 +1252,7 @@ def select_improvement(perf, model, log_issues, signal):
     return {
         "id": "maintenance",
         "name": "Pipeline Health Review",
-        "description": "All planned improvements complete. No new code changes this week.",
+        "description": "All planned improvements complete. No new code changes needed.",
         "type": "report_only",
         "priority_reason": "All improvements in queue are done",
     }
@@ -1009,6 +1280,29 @@ def run_tests():
 # ─────────────────────────────────────────────────────────────────────────────
 #  GIT HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _days_since_last_optimizer_commit() -> int:
+    """
+    Return days since the last optimizer-applied git commit.
+    All optimizer commits include 'optimizer:' in the message.
+    Returns 999 when no optimizer commit found in the last 90 days.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "log", "-1", "--format=%cd", "--date=short",
+             "--grep=optimizer:"],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        last = result.stdout.strip()
+        if last:
+            return (date.today() - date.fromisoformat(last)).days
+    except Exception:
+        pass
+    return 999
+
 
 def git_commit(message: str):
     subprocess.run(
@@ -1095,16 +1389,46 @@ def send_discord_report(report: dict):
             )
         signal_block = "\n".join(signal_lines) + "\n\n"
 
+    # Rolling data coverage block
+    rolling_data = report.get("rolling")
+    rolling_block = ""
+    if rolling_data:
+        pl = rolling_data["pitcher_logs"]
+        tl = rolling_data["team_logs"]
+        stale_warn = " ⚠️ STALE" if rolling_data["issues"] else ""
+        rolling_block = (
+            f"**Rolling Stats Pipeline{stale_warn}:**\n"
+            f"- Pitcher logs: {pl['total_starter_rows']} rows | "
+            f"yesterday: {pl['yesterday_starters']} SPs | "
+            f"blend-ready (21d): {pl['blend_5plus']} SPs ≥5gs / "
+            f"{pl['blend_10plus']} ≥10gs / {pl['blend_20plus']} ≥20gs\n"
+            f"- Team logs: {tl['total_rows']} rows | "
+            f"yesterday: {tl['yesterday_teams']} teams | "
+            f"{tl['teams_5plus_14d']}/30 teams blend-ready (14d)\n"
+        )
+        if rolling_data["issues"]:
+            rolling_block += f"- ⚠️ {'; '.join(rolling_data['issues'])}\n"
+        # Add batter logs if they exist
+        snap_data = report.get("snap", {})
+        batter_rows = snap_data.get("db_tables", {}).get("batter_game_logs", {}).get("rows")
+        if batter_rows is not None:
+            rolling_block += f"- Batter logs: {batter_rows} rows\n"
+        # Data gaps summary
+        gaps = snap_data.get("data_gaps", [])
+        if gaps:
+            rolling_block += f"- Gaps identified: {len(gaps)} — next queue items address these\n"
+        rolling_block += "\n"
+
     # Improvement result block
     imp_name   = imp.get("name", "Unknown") if imp else "None"
     imp_reason = imp.get("priority_reason", "") if imp else ""
 
     if result.get("skipped"):
-        action_block = f"**This week:** No action — {result.get('reason', 'unknown')}"
+        action_block = f"**Tonight:** No action — {result.get('reason', 'unknown')}"
     elif result.get("success"):
         diff = result.get("diff_stat", "").strip()
         action_block = (
-            f"**This week:** ✅ {imp_name}\n"
+            f"**Tonight:** ✅ {imp_name}\n"
             f"**Why:** {imp_reason}\n"
         )
         if diff:
@@ -1113,17 +1437,18 @@ def send_discord_report(report: dict):
                         f"\n⚠️ Tests:\n```{result.get('test_output','')[:200]}```"
     else:
         action_block = (
-            f"**This week:** ❌ {imp_name} — FAILED\n"
+            f"**Tonight:** ❌ {imp_name} — FAILED\n"
             f"**Error:** {result.get('error', 'unknown')[:200]}"
         )
 
     msg = (
-        f"⚙️ **MLB ENGINE — WEEKLY OPTIMIZER REPORT**\n"
-        f"**Week of {week}** | Backtest baseline: {BACKTEST_REFERENCE['total_games']:,} games "
+        f"⚙️ **MLB ENGINE — DAILY OPTIMIZER REPORT**\n"
+        f"**{week}** | Backtest baseline: {BACKTEST_REFERENCE['total_games']:,} games "
         f"({', '.join(str(s) for s in BACKTEST_REFERENCE['seasons'])})\n\n"
         f"**Pipeline Performance (Last 30 Days):**\n"
         f"{perf_block}\n"
         f"{model_block}\n\n"
+        f"{rolling_block}"
         f"{signal_block}"
         f"{action_block}"
     )
@@ -1135,7 +1460,7 @@ def send_discord_report(report: dict):
             timeout=10
         )
         if resp.status_code == 204:
-            print("[DISCORD] Weekly optimizer report sent.")
+            print("[DISCORD] Daily optimizer report sent.")
         else:
             print(f"[DISCORD] Failed ({resp.status_code}): {resp.text}")
     except Exception as e:
@@ -1148,15 +1473,18 @@ def send_discord_report(report: dict):
 
 def main():
     print("=" * 60)
-    print(f"  MLB WEEKLY OPTIMIZER — {date.today().strftime('%B %d, %Y')}")
+    print(f"  MLB DAILY OPTIMIZER — {date.today().strftime('%B %d, %Y')}")
     print("=" * 60)
 
     # ── 1. Analysis ──
     print("\n[1/4] Analyzing pipeline performance...")
     perf   = analyze_pick_performance(days=30)
-    model  = analyze_model_accuracy(days=30)
-    signal = analyze_agent_signals(days=30)
-    log    = analyze_log_issues()
+    model   = analyze_model_accuracy(days=30)
+    signal  = analyze_agent_signals(days=30)
+    log     = analyze_log_issues()
+    rolling = analyze_rolling_data()
+
+    snap = snapshot_pipeline()
 
     graded = perf["total"] if perf else 0
     print(f"  Graded picks (30d): {graded}")
@@ -1167,9 +1495,26 @@ def main():
     else:
         print(f"  Log: clean (errors={log['error_count']}, fallbacks={log['fallback_count']})")
 
+    pl = rolling["pitcher_logs"]
+    tl = rolling["team_logs"]
+    print(f"  Rolling data — pitchers: {pl['total_starter_rows']} rows, "
+          f"blend active: {pl['blend_5plus']} SPs (40%), {pl['blend_10plus']} (60%), {pl['blend_20plus']} (75%)")
+    print(f"  Rolling data — teams: {tl['total_rows']} rows, "
+          f"{tl['teams_5plus_14d']}/30 teams blend-ready (14d)")
+    if rolling["issues"]:
+        print(f"  Rolling data issues: {rolling['issues']}")
+    if snap["data_gaps"]:
+        print(f"  Data gaps: {len(snap['data_gaps'])} identified")
+        for g in snap["data_gaps"]:
+            print(f"    - {g}")
+
     # ── 2. Select improvement ──
     print("\n[2/4] Selecting improvement...")
-    improvement = select_improvement(perf, model, log, signal)
+    # Merge rolling data issues into log issues for priority selection
+    combined_log = dict(log)
+    combined_log["issues"] = log["issues"] + rolling["issues"]
+
+    improvement = select_improvement(perf, model, combined_log, signal)
     print(f"  Selected: [{improvement['id']}] {improvement['name']}")
     print(f"  Reason: {improvement['priority_reason']}")
 
@@ -1190,7 +1535,7 @@ def main():
             tests_passed, test_output = run_tests()
             if tests_passed:
                 git_commit(
-                    f"chore: weekly weight rebalance {date.today().isoformat()} "
+                    f"chore: optimizer: weight rebalance {date.today().isoformat()} "
                     f"— {', '.join(f'{k}: {v[0]}→{v[1]}' for k,v in changes.items())}"
                 )
                 diff = git_diff_stat()
@@ -1210,7 +1555,7 @@ def main():
             tests_passed, test_output = run_tests()
             if tests_passed:
                 git_commit(
-                    f"chore: adjust MIN_CONFIDENCE {impl['old']}→{impl['new']} "
+                    f"chore: optimizer: adjust MIN_CONFIDENCE {impl['old']}→{impl['new']} "
                     f"based on {improvement['win_rate']:.1f}% win rate"
                 )
                 diff = git_diff_stat()
@@ -1229,7 +1574,7 @@ def main():
         if impl.get("success"):
             tests_passed, test_output = run_tests()
             if tests_passed:
-                git_commit(f"Weekly optimizer: {improvement['name']}")
+                git_commit(f"feat: optimizer: {improvement['name']}")
                 diff = git_diff_stat()
                 mark_complete(improvement["id"], improvement["name"], improvement["description"])
                 result = {
@@ -1257,11 +1602,13 @@ def main():
         "perf":        perf,
         "model":       model,
         "signal":      signal,
+        "rolling":     rolling,
+        "snap":        snap,
         "improvement": improvement,
         "result":      result,
     })
 
-    print("\n✅ Weekly optimizer complete.")
+    print("\n✅ Daily optimizer complete.")
 
 
 if __name__ == "__main__":

@@ -325,16 +325,13 @@ def init_db():
         pass  # column already exists
 
     # Migrate: remove CHECK constraint from pick_type by recreating picks table
-    # Test if f5_ml can be inserted; if not, recreate the table
-    try:
-        conn.execute("""
-            INSERT INTO picks (game_id, pick_type, confidence, win_probability, edge_score,
-                               projected_away_score, projected_home_score, created_at, updated_at)
-            VALUES (-1, 'f5_ml', 7, 50.0, 0.1, 0, 0, 'test', 'test')
-        """)
-        conn.rollback()  # don't actually insert
-    except sqlite3.IntegrityError:
-        # CHECK constraint present — recreate table without it
+    # Inspect the schema directly instead of probing with an INSERT (avoids FK side-effects)
+    picks_sql = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='picks'"
+    ).fetchone()
+    _needs_migration = picks_sql and "pick_type" in (picks_sql["sql"] or "") and \
+        "moneyline" in (picks_sql["sql"] or "")
+    if _needs_migration:
         conn.execute("ALTER TABLE picks RENAME TO picks_old")
         conn.execute("""
             CREATE TABLE picks (
