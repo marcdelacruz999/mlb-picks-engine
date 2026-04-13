@@ -74,6 +74,12 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **Mock patch target** — if `fetch_lineup_batting` (or any function) is imported at module level in analysis.py, mock as `analysis.fetch_lineup_batting` not `data_mlb.fetch_lineup_batting`.
 
+**RemoteTrigger is cloud-side** — the 2 AM CEO nightly trigger (`trig_01CAuaYtQCBpWSHfNFnS1gJw`) runs against a fresh GitHub clone, not locally. It survives session restarts. To check if it ran: `git fetch origin && git log origin/main --since="YYYY-MM-DD 02:00"`.
+
+**launchd jobs don't log by default** — none of the plists have `StandardOutPath`. All output goes to `engine.log` via the run_*.sh wrappers. `LastExitStatus = 0` with no `LastRunTime` means the job has never fired since being loaded (likely Mac was asleep at scheduled time).
+
+**pitcher_game_logs / team_game_logs are forward-only** — `collect_boxscores()` is called nightly for yesterday only. If the DB is empty, run `backfill_boxscores.py` (project root) to populate from Apr 1 through yesterday. Safe to re-run (INSERT OR IGNORE).
+
 **DB migration** — use `except sqlite3.OperationalError: pass` (not bare `except Exception`).
 
 ---
