@@ -147,9 +147,7 @@ Log API issues, missing data, or anomalies here.
 ### Known Ongoing Issues
 - Statcast data thin in April (small sample size for team stats early season)
 - FanGraphs scraping non-functional — wRC+ not available
-- Home/away pitcher splits not fetched — model uses season ERA only
 - Rolling stats active: pitcher_game_logs/team_game_logs backfilled April 1-11; auto-collected nightly via --results; blend kicks in at 5+ games
-- Line movement tracking not stored
 
 ---
 
@@ -180,10 +178,11 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 | 2026-04-11 | `--refresh` sent cancel/reduce alerts for games already in progress or final — not actionable | Fixed: check `refreshed["status"]` in refresh loop; skip anything not in `{Scheduled, Pre-Game, Warmup, Delayed Start}` |
 | 2026-04-12 | `run_results()` crashed with `ValueError` parsing O/U total line — notes field format `"Total line: 8.5 \| Lineups confirmed"` broke naive `.replace()` + `float()` | Fixed: `_parse_total_line()` uses regex `r"Total line:\s*([\d.]+)"` to extract number regardless of trailing text |
 | 2026-04-12 | `collect_boxscores()` returned 0 pitcher rows for historical dates — `schedule?hydrate=boxscore` omits player-level stats for past games | Fixed: fetch `/game/{gamePk}/boxscore` per game; backfilled April 1-11 |
+| 2026-04-12 | `fetch_travel_context()` called with `target_date=None` from `collect_game_data()` — `date.fromisoformat(None)` crashes → travel fatigue signal returns `{}` for all 15 teams on every run | Fixed: pass `g["game_date"]` (always str) instead of `target_date`; added `isinstance(game_date, str)` guard inside function |
 
 ---
 
-## System Snapshot — 2026-04-12 (updated session 3)
+## System Snapshot — 2026-04-12 (updated session 4)
 
 ### What's been built
 - 7-agent weighted scoring engine with Discord alerts
@@ -201,6 +200,12 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 - **ROI tracking** — `ml_odds`/`ou_odds` stored in picks table at send time; `get_roi_summary()` calculates true unit P&L; `--status` shows net units
 - **Rolling stats pipeline** — `pitcher_game_logs` + `team_game_logs` tables; `collect_boxscores()` uses `/game/{gamePk}/boxscore` per game (not hydrate — hydrate omits player stats for historical dates); auto-collects after `--results`; backfill via `--collect DATE`; blend weights: <5gs = season, 5-9 = 40%, 10-19 = 60%, ≥20 = 75%; pitching/offense/bullpen agents all blend; agent scores stored in `analysis_log` (7 columns) for optimizer signal
 - **Agent scores in analysis_log** — all 7 agent scores stored daily across all 15 games; optimizer has full signal data independent of pick filter
+- **Home/away SP splits** — `fetch_pitcher_home_away_splits()` in data_mlb.py; away SP uses `away_era` split, home SP uses `home_era` split as `_blend()` base; `_pitcher_split_cache` per session
+- **Bullpen top reliever ERA** — `get_bullpen_top_relievers()` in database.py; top 3 relievers by IP (last 7d); IP-weighted ERA appended to bullpen edge
+- **Line movement tracking** — `opening_lines` table (INSERT OR IGNORE); Watch alert in `--refresh` when ML implied prob drops ≥5pp or total moves ≥0.5 against pick
+- **F5 picks** — `fetch_f5_odds()` (`baseball_mlb_h1` sport key); `_analyze_f5_pick()` fires when |pitching_score| ≥ 0.20; `pick_type = "f5_ml"`; graded via innings 1-5 linescore; Discord shows "F5 ML (First 5 Innings)"
+- **Half-Kelly sizing** — `kelly_stake()` in analysis.py; 0.25–2.0x stake shown in Discord as `**Stake:** Xx units`
+- **Opponent-adjusted rolling ERA** — `opponent_team_id` in `pitcher_game_logs`; `get_pitcher_rolling_stats_adjusted()` weights by `opponent_rpg / 4.3`
 
 ### Backtest findings (2024+2025, 4,855 games)
 | Metric | Value |
@@ -232,7 +237,7 @@ Weekly optimizer runs every Sunday at 9pm — fully autonomous. See COMPLETED_IM
 
 ---
 
-## Improvement Roadmap — updated 2026-04-12
+## Improvement Roadmap — updated 2026-04-12 (session 4)
 
 Ranked by estimated impact on pick quality. Items marked ✅ are done.
 Items marked 🔲 are not yet scheduled.
@@ -245,9 +250,9 @@ Items marked 🔲 are not yet scheduled.
 | 2 | **Pitcher scratch / lineup change detection** | ✅ Done 2026-04-11 | monitor.py; launchd plist active (every 30 min) |
 | 3 | **Lineup strength scoring** | ✅ Done 2026-04-11 | Batch MLB people API; session cache |
 | 4 | **Rolling stats pipeline** | ✅ Done 2026-04-12 | pitcher_game_logs + team_game_logs; blend <5/5-9/10-19/20+ games; pitching + offense + bullpen agents |
-| 5 | **Home/away SP splits** | 🔲 | Season ERA ignores venue split — some SPs differ by 2-3 runs; MLB API has this free; biggest remaining pitching agent gap |
-| 6 | **F5 (First 5 Innings) picks** | 🔲 | Isolates SP quality, removes bullpen variance; leverages pitching signal (+0.080 lift); Odds API has F5 markets |
-| 7 | **Line movement tracking** | 🔲 | Store opening line at first fetch; compare at each --refresh; line moving against pick = sharp money disagrees; strong filter signal |
+| 5 | **Home/away SP splits** | ✅ Done 2026-04-12 | fetch_pitcher_home_away_splits(); away SP uses away_era split, home SP uses home_era split |
+| 6 | **F5 (First 5 Innings) picks** | ✅ Done 2026-04-12 | baseball_mlb_h1 sport key; fires when |pitching_score| ≥ 0.20; graded via linescore innings 1-5 |
+| 7 | **Line movement tracking** | ✅ Done 2026-04-12 | opening_lines table; Watch alert on ≥5pp ML drop or ≥0.5 total move against pick |
 
 ### Tier 2 — Solid signal improvements
 
@@ -256,15 +261,15 @@ Items marked 🔲 are not yet scheduled.
 | 8 | **Weather at game-specific start time** | ✅ Done 2026-04-11 | zoneinfo; falls back to 7pm |
 | 9 | **Travel fatigue signal** | ✅ Done 2026-04-11 | Away only; road_games + tz_changes; cap 0.08 |
 | 10 | **Actual odds stored for ROI tracking** | ✅ Done 2026-04-11 | ml_odds/ou_odds in picks; net_units in --status |
-| 11 | **Bullpen recent ERA from pitcher_game_logs** | 🔲 | Data already collected; filter non-starters last 7d; surface ERA of top 3-4 relievers by usage |
+| 11 | **Bullpen recent ERA from pitcher_game_logs** | ✅ Done 2026-04-12 | get_bullpen_top_relievers(); top 3 by IP last 7d; IP-weighted ERA in bullpen edge |
 | 12 | **Pitcher velocity/stuff trends** | 🔲 | Statcast has per-game velo; velo -1-2mph over last month = regression before ERA shows it |
-| 13 | **Opponent-adjusted rolling stats** | 🔲 | Rolling ERA vs weak lineups less meaningful than vs strong; schedule-of-opponents adjustment |
+| 13 | **Opponent-adjusted rolling stats** | ✅ Done 2026-04-12 | get_pitcher_rolling_stats_adjusted(); weight = opponent_rpg / 4.3; ≥3 opponent games required |
 
 ### Tier 3 — Structural improvements
 
 | # | Improvement | Status | Notes |
 |---|-------------|--------|-------|
-| 14 | **Kelly criterion pick sizing** | 🔲 | Size bets by edge: conf 9 + EV = 1.5x, conf 7 borderline = 0.5x; improves capital allocation |
+| 14 | **Kelly criterion pick sizing** | ✅ Done 2026-04-12 | kelly_stake() half-Kelly; 0.25–2.0x; shown in Discord as **Stake:** |
 | 15 | **Correlated pick cap** | 🔲 | Max 2 overs/unders/same-division per day |
 | 16 | **Backtest point-in-time stats** | 🔲 | April games analyzed with October stats — inflates accuracy |
 
@@ -276,11 +281,15 @@ Items marked 🔲 are not yet scheduled.
 ✅ Weather timing — done 2026-04-11
 ✅ Travel fatigue — done 2026-04-11
 ✅ Rolling stats pipeline (pitching/offense/bullpen agents) — done 2026-04-12
-🔲 Home/away pitcher ERA splits (pitching agent)
-🔲 Opening line movement tracking (market agent)
-🔲 F5 picks (new pick type)
-🔲 Bullpen recent ERA from game logs (data already available)
+✅ Home/away pitcher ERA splits (pitching agent) — done 2026-04-12
+✅ Opening line movement tracking (market agent) — done 2026-04-12
+✅ F5 picks (new pick type) — done 2026-04-12
+✅ Bullpen recent ERA from game logs — done 2026-04-12
+✅ Kelly criterion sizing — done 2026-04-12
+✅ Opponent-adjusted rolling ERA — done 2026-04-12
 🔲 API error handling & retry logic (data quality)
+🔲 Correlated pick cap (max 2 overs/unders/same-division)
+🔲 Pitcher velocity trends (Statcast per-game velo)
 
 ---
 

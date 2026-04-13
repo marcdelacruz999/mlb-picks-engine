@@ -752,6 +752,8 @@ def fetch_travel_context(team_id: int, game_date: str) -> dict:
     Returns {} on error.
     """
     try:
+        if not isinstance(game_date, str):
+            game_date = date.today().isoformat()
         start_date = (date.fromisoformat(game_date) - timedelta(days=7)).isoformat()
         url = (
             f"{MLB_BASE}/schedule?teamId={team_id}"
@@ -1004,8 +1006,8 @@ def collect_game_data(target_date: str = None) -> list:
         g["away_record"] = fetch_team_record(g["away_team_mlb_id"])
         g["home_record"] = fetch_team_record(g["home_team_mlb_id"])
 
-        # Fetch travel context (fatigue signal)
-        g["away_travel"] = fetch_travel_context(g["away_team_mlb_id"], target_date)
+        # Fetch travel context (fatigue signal) — use game_date from game dict (always a valid str)
+        g["away_travel"] = fetch_travel_context(g["away_team_mlb_id"], g["game_date"])
 
         # Fetch weather
         g["weather"] = fetch_venue_weather(g.get("venue_id"), target_date, g.get("game_time_utc", ""))

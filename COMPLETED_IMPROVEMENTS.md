@@ -61,3 +61,70 @@ Each entry uses an HTML comment marker for reliable ID matching:
 **Date:** 2026-04-11
 **Commit:** feat: store send-time odds and calculate true unit ROI in --status; fix: correct ROI denominator
 **Summary:** ml_odds and ou_odds columns added to picks table. risk_filter() includes pick-side odds in pick dicts. engine.py stores in pick_record. get_roi_summary() calculates true unit profit/loss. _print_snapshot() shows net units. Denominator is all graded picks (W+L+P).
+
+---
+
+<!-- id: rolling_stats_pipeline -->
+<!-- id: rolling_trends -->
+## Rolling Stats Pipeline
+**Date:** 2026-04-12
+**Commit:** feat: add rolling stats pipeline with pitcher_game_logs and team_game_logs
+**Summary:** Added pitcher_game_logs and team_game_logs tables. collect_boxscores() uses /game/{gamePk}/boxscore per game (NOT schedule?hydrate=boxscore which omits player stats historically). Auto-collects after --results; backfill via --collect DATE. Blend weights in _blend(): <5 games = season only, 5-9 = 40%, 10-19 = 60%, >=20 = 75%. Agent scores (7 columns) added to analysis_log.
+
+---
+
+<!-- id: home_away_sp_splits -->
+<!-- id: home_away_splits -->
+## Home/Away SP ERA Splits
+**Date:** 2026-04-12
+**Commit:** feat: add home/away SP ERA splits to pitching agent
+**Summary:** fetch_pitcher_home_away_splits() in data_mlb.py fetches venue-specific ERA/WHIP/K9/BB9 from MLB Stats API hydrate endpoint. _pitcher_split_cache prevents re-fetching. score_pitching() uses away_era split for away SP, home_era split for home SP, as base for _blend(). Uses is-not-None guard (not `or`) to preserve 0.0 ERA values.
+
+---
+
+<!-- id: bullpen_key_relievers -->
+## Bullpen Top Reliever ERA
+**Date:** 2026-04-12
+**Commit:** feat: surface top-reliever ERA from game logs in bullpen agent
+**Summary:** get_bullpen_top_relievers() queries pitcher_game_logs for is_starter=0, returns top 3 relievers by total IP over last 7 days with IP-weighted ERA. Appended to bullpen edge string: "Home top pen (7d): Smith, Jones — 2.45 ERA".
+
+---
+
+<!-- id: line_movement_tracking -->
+<!-- id: line_movement -->
+## Line Movement Tracking
+**Date:** 2026-04-12
+**Commit:** feat: add line movement tracking and opening line comparison in refresh
+**Summary:** opening_lines table (INSERT OR IGNORE — first capture kept). save_opening_lines()/get_opening_lines() in database.py. Captured in run_analysis() and run_refresh(). Line movement check in refresh else-branch fires Watch alert when ML implied prob drops >=5pp or total moves >=0.5 runs against pick direction.
+
+---
+
+<!-- id: f5_picks -->
+## F5 (First 5 Innings) Picks
+**Date:** 2026-04-12
+**Commit:** feat: add F5 odds fetch, analysis, engine wiring, DB migration, grading (Plan B complete)
+**Summary:** fetch_f5_odds() uses baseball_mlb_h1 sport key. _analyze_f5_pick() fires when |pitching_score| >= 0.20; confidence 7/8/9 by magnitude; pick_type = "f5_ml". picks table CHECK constraint on pick_type removed via rename/recreate migration. Graded via _grade_f5_pick() using /game/{pk}/linescore innings 1-5. Discord shows "F5 ML (First 5 Innings)".
+
+---
+
+<!-- id: kelly_criterion -->
+## Half-Kelly Criterion Stake Sizing
+**Date:** 2026-04-12
+**Commit:** feat: add half-Kelly criterion stake sizing to picks
+**Summary:** kelly_stake() in analysis.py. Half-Kelly formula: full_kelly = (b*p - q) / b; half = *0.5. Floor 0.25x, cap 2.0x. Returns 1.0 when odds unavailable. Wired into all 3 pick types (ML, O/U, F5). Discord shows "**Stake:** Xx units" after EV line.
+
+---
+
+<!-- id: travel_context_none_bug -->
+## Travel Fatigue Bug Fix — fromisoformat(None) Crash
+**Date:** 2026-04-12
+**Commit:** fix: pass g["game_date"] to fetch_travel_context; add isinstance guard
+**Summary:** `collect_game_data()` passed `target_date` (which is `None` on all normal runs) to `fetch_travel_context()`. `date.fromisoformat(None)` crashed → all 15 teams returned `{}` → travel fatigue signal was silently zero for every game every day since the feature was added. Fix: use `g["game_date"]` (always a valid YYYY-MM-DD str set by `fetch_todays_games()`). Also added `isinstance(game_date, str)` guard inside the function as a defensive backstop. Tests: 119 pass, 2 pre-existing failures unchanged.
+
+---
+
+<!-- id: opponent_adjusted_era -->
+## Opponent-Adjusted Rolling SP ERA
+**Date:** 2026-04-12
+**Commit:** feat: opponent-adjusted rolling SP ERA; Plan C complete
+**Summary:** opponent_team_id column added to pitcher_game_logs (migration + collect_boxscores population). get_pitcher_rolling_stats_adjusted() weights each start by opponent_rpg / 4.3 (league avg), using 14-day opponent R/G window. Requires >=3 opponent games or defaults weight=1.0. Used in collect_game_data() with plain fallback via `or`.
