@@ -36,6 +36,33 @@ Notes:
 
 <!-- Add daily entries below this line, newest first -->
 
+### 2026-04-13 — Session Notes
+**Pipeline audit complete. DB now fully populated.**
+
+**What happened:**
+- Discovered `pitcher_game_logs` and `team_game_logs` were empty — engine had been running on pure Statcast/season-avg data with no rolling stats
+- Created `backfill_boxscores.py` and populated 1,379 pitcher logs + 320 team logs for Apr 1–12
+- Re-ran engine with full data: 5 picks sent (vs 3 before backfill) — 2 new picks unlocked by rolling bullpen ERA data
+- Confirmed RemoteTrigger (2 AM CEO) is cloud-side and session-independent — it ran Apr 13 but found empty DB; will be meaningful going forward
+- launchd jobs all have `LimitLoadToSessionType = Aqua` — miss if Mac is asleep; 8 AM main run missed today, manually triggered
+
+**Pipeline verified end-to-end:**
+1. 8 AM: `engine.py` — picks sent, `analysis_log` written, `opening_lines` captured
+2. 11 AM–5 PM: `engine.py --refresh` — re-validates picks, line movement alerts
+3. 11 PM: `engine.py --results` — grades picks + collects boxscores → `pitcher_game_logs` + `team_game_logs`
+4. 11:30 PM: `optimizer.py` — nightly self-improvement (7-day cooldown)
+5. 1:45 AM: `export_db_snapshot.py` → `DB_SNAPSHOT.md` committed to GitHub
+6. 2:00 AM: RemoteTrigger cloud agent → reads GitHub, implements one improvement
+
+**Known gap:** `analysis_log` missing Apr 11–12 rows (DB was empty during those runs). ML accuracy baseline starts Apr 13.
+
+**Picks sent today (with full rolling data):**
+- HOU @ SEA: OVER 7.5 (conf 7, EV +0.336)
+- ARI @ BAL: Baltimore ML (conf 7, EV +0.030)
+- LAA @ NYY: UNDER 9.5 (conf 7, EV +0.700)
+- MIA @ ATL: Atlanta ML (conf 7, EV +0.022)
+- NYM @ LAD: Dodgers ML (conf 7, EV +0.032)
+
 ### 2026-04-11
 Picks: 5 sent | Results: 1-4-0 (W-L-P) | Net: -3.074 units
 
