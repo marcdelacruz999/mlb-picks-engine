@@ -1139,6 +1139,10 @@ def _calculate_ev(win_prob_pct: float, ml_odds) -> "float | None":
     """
     if ml_odds is None or ml_odds == 0:
         return None
+    # Reject implausible odds — real juice is never tighter than ±15
+    # (e.g. -14 would imply +700 payout, which is a data error)
+    if abs(ml_odds) < 15:
+        return None
     win_prob = win_prob_pct / 100.0
     loss_prob = 1.0 - win_prob
     if ml_odds < 0:
@@ -1200,7 +1204,8 @@ def risk_filter(analyses: list) -> list:
 
         # Over/Under pick evaluation
         ou = a.get("ou_pick", {})
-        if ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE:
+        if (ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE
+                and a["ml_edge_score"] >= MIN_EDGE_SCORE):
             market_detail = a["agents"]["market"]["detail"]
             ou_odds = (market_detail.get("over_price") if ou["pick"] == "over"
                        else market_detail.get("under_price"))
