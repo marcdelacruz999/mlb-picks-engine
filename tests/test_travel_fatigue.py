@@ -34,6 +34,31 @@ def _make_schedule_response(team_id, game_date, game_entries):
     return {"dates": dates}
 
 
+def test_fetch_travel_context_accepts_date_object():
+    """fetch_travel_context should accept a date object, not just a string."""
+    import data_mlb
+
+    team_id = 147  # Yankees
+    game_date_obj = date(2026, 4, 11)  # Pass a date object, not a string
+
+    entries = [
+        {"date": "2026-04-11", "is_away": True, "home_abbr": "BOS"},
+    ]
+    fake_response = _make_schedule_response(team_id, "2026-04-11", entries)
+
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = fake_response
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("data_mlb.requests.get", return_value=mock_resp) as mock_get:
+        result = data_mlb.fetch_travel_context(team_id, game_date_obj)
+
+    # Should have succeeded — and the URL should contain the correct date
+    call_url = mock_get.call_args[0][0]
+    assert "2026-04-11" in call_url, f"Expected date in URL, got: {call_url}"
+    assert result != {}, "Expected non-empty result for valid date object input"
+
+
 def test_fetch_travel_context_consecutive_road_games():
     """Mock API with 6 consecutive away games — consecutive_road_games should be 6."""
     import data_mlb

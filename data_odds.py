@@ -6,11 +6,37 @@ https://the-odds-api.com
 """
 
 import requests
+import time
 from datetime import datetime, timezone
 from config import ODDS_API_KEY
 
 ODDS_BASE = "https://api.the-odds-api.com/v4"
 SPORT = "baseball_mlb"
+
+_RETRY_ERRORS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+_MAX_RETRIES = 2
+_RETRY_DELAY = 2  # seconds
+
+
+def _api_get(url: str, func_name: str, timeout: int = 15, **kwargs):
+    """
+    Wrapper around requests.get with retry logic for transient network errors.
+    Retries up to _MAX_RETRIES times on ConnectionError or Timeout.
+    On final failure logs [WARNING] with function name and error.
+    Raises for non-retryable errors after first attempt.
+    Returns the Response object on success.
+    """
+    last_exc = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, timeout=timeout, **kwargs)
+            return resp
+        except _RETRY_ERRORS as e:
+            last_exc = e
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY)
+    print(f"[WARNING] {func_name}: {last_exc}")
+    raise last_exc
 
 
 def fetch_odds() -> list:
@@ -32,7 +58,7 @@ def fetch_odds() -> list:
     }
 
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = _api_get(url, "fetch_odds", params=params)
         resp.raise_for_status()
         data = resp.json()
 
@@ -42,16 +68,18 @@ def fetch_odds() -> list:
 
         return _parse_odds(data)
 
+    except _RETRY_ERRORS:
+        return []  # _api_get already logged [WARNING]
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 401:
             print("[ODDS] Invalid API key. Check your config.")
         elif e.response.status_code == 429:
             print("[ODDS] Rate limit exceeded. Wait before retrying.")
         else:
-            print(f"[ODDS] HTTP error: {e}")
+            print(f"[WARNING] fetch_odds: {e}")
         return []
     except Exception as e:
-        print(f"[ODDS] Error fetching odds: {e}")
+        print(f"[WARNING] fetch_odds: {e}")
         return []
 
 
@@ -74,20 +102,22 @@ def fetch_f5_odds() -> list:
     }
 
     try:
-        resp = requests.get(url, params=params, timeout=15)
+        resp = _api_get(url, "fetch_f5_odds", params=params)
         resp.raise_for_status()
         data = resp.json()
         remaining = resp.headers.get("x-requests-remaining", "?")
         print(f"[ODDS] F5: Fetched {len(data)} games. API calls remaining: {remaining}")
         return _parse_odds(data)
+    except _RETRY_ERRORS:
+        return []  # _api_get already logged [WARNING]
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 404:
             print("[ODDS] F5 market not available (baseball_mlb_h1 not found).")
         else:
-            print(f"[ODDS] F5 HTTP error: {e}")
+            print(f"[WARNING] fetch_f5_odds: {e}")
         return []
     except Exception as e:
-        print(f"[ODDS] F5 error: {e}")
+        print(f"[WARNING] fetch_f5_odds: {e}")
         return []
 
 

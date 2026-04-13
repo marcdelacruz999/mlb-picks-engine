@@ -18,6 +18,31 @@ MLB_BASE = "https://statsapi.mlb.com/api/v1"
 _player_stat_cache: dict = {}
 _pitcher_split_cache: dict = {}
 
+_RETRY_ERRORS = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+_MAX_RETRIES = 2
+_RETRY_DELAY = 2  # seconds
+
+
+def _api_get(url: str, func_name: str, timeout: int = 15, **kwargs):
+    """
+    Wrapper around requests.get with retry logic for transient network errors.
+    Retries up to _MAX_RETRIES times on ConnectionError or Timeout.
+    On final failure logs [WARNING] with function name and error.
+    Raises for non-retryable errors (e.g. HTTPError) after first attempt.
+    Returns the Response object on success.
+    """
+    last_exc = None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            resp = requests.get(url, timeout=timeout, **kwargs)
+            return resp
+        except _RETRY_ERRORS as e:
+            last_exc = e
+            if attempt < _MAX_RETRIES:
+                time.sleep(_RETRY_DELAY)
+    print(f"[WARNING] {func_name}: {last_exc}")
+    raise last_exc
+
 
 def fetch_lineup_batting(player_ids: list) -> list:
     """Fetch batting stats for a list of player IDs. Cached per session.
@@ -301,11 +326,13 @@ def fetch_pitcher_stats(pitcher_mlb_id: int, season: int = None) -> dict:
         f"?hydrate=stats(group=[pitching],type=[season],season={_season})"
     )
     try:
-        resp = requests.get(url, timeout=15)
+        resp = _api_get(url, f"fetch_pitcher_stats({pitcher_mlb_id})")
         resp.raise_for_status()
         data = resp.json()
+    except _RETRY_ERRORS:
+        return {}  # _api_get already logged [WARNING]
     except Exception as e:
-        print(f"[DATA] Error fetching pitcher {pitcher_mlb_id}: {e}")
+        print(f"[WARNING] fetch_pitcher_stats({pitcher_mlb_id}): {e}")
         return {}
 
     person = data.get("people", [{}])[0]
@@ -752,14 +779,13 @@ def fetch_travel_context(team_id: int, game_date: str) -> dict:
     Returns {} on error.
     """
     try:
-        if not isinstance(game_date, str):
-            game_date = date.today().isoformat()
+        game_date = str(game_date) if not isinstance(game_date, str) else game_date
         start_date = (date.fromisoformat(game_date) - timedelta(days=7)).isoformat()
         url = (
             f"{MLB_BASE}/schedule?teamId={team_id}"
             f"&startDate={start_date}&endDate={game_date}&sportId=1"
         )
-        resp = requests.get(url, timeout=15)
+        resp = _api_get(url, f"fetch_travel_context(team {team_id})")
         resp.raise_for_status()
         data = resp.json()
 
@@ -1210,7 +1236,7 @@ def fetch_venue_weather(venue_id: int, game_date: str = None, game_time_utc: str
             f"&start_date={game_date}&end_date={game_date}"
             "&timezone=auto"
         )
-        resp = requests.get(url, timeout=10)
+        resp = _api_get(url, f"fetch_venue_weather(venue {venue_id})", timeout=10)
         resp.raise_for_status()
         data = resp.json()
         hourly = data.get("hourly", {})
@@ -1258,8 +1284,10 @@ def fetch_venue_weather(venue_id: int, game_date: str = None, game_time_utc: str
             "weathercode": wcode,
             "forecast_for": forecast_for,
         }
+    except _RETRY_ERRORS:
+        return {}  # _api_get already logged [WARNING]
     except Exception as e:
-        print(f"[WEATHER] Failed to fetch weather for venue {venue_id}: {e}")
+        print(f"[WARNING] fetch_venue_weather(venue {venue_id}): {e}")
         return {}
 
 
