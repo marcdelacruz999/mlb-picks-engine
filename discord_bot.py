@@ -115,44 +115,45 @@ def _format_pick_message(pick: dict) -> str:
     game_time_str = _format_game_time(pick.get("game_time_utc", ""))
 
     msg = (
-        f"🚨 **MLB HIGH-CONFIDENCE PICK**\n"
+        f"🚨⚾ **MLB HIGH-CONFIDENCE PICK** ⚾🚨\n"
         f"\n"
-        f"**Game:** {pick.get('game', '?')}\n"
+        f"🏟️ **Game:** {pick.get('game', '?')}\n"
     )
     if game_time_str:
-        msg += f"**Date/Time:** {game_time_str}\n"
+        msg += f"🕐 **Date/Time:** {game_time_str}\n"
     msg += (
-        f"**Pick:** {pick_display}\n"
-        f"**Confidence:** {pick.get('confidence', '?')}/10\n"
-        f"**Win Probability:** {pick.get('win_probability', '?')}%\n"
+        f"🎯 **Pick:** {pick_display}\n"
+        f"💪 **Confidence:** {pick.get('confidence', '?')}/10\n"
+        f"📈 **Win Probability:** {pick.get('win_probability', '?')}%\n"
     )
     ev = pick.get("ev_score")
     if ev is not None:
         ev_str = f"{ev:+.3f}"
-        msg += f"**Expected Value:** {ev_str} per unit\n"
+        ev_emoji = "💰" if ev > 0 else "⚠️"
+        msg += f"{ev_emoji} **Expected Value:** {ev_str} per unit\n"
     kelly = pick.get("kelly_fraction")
     if kelly is not None:
-        msg += f"**Stake:** {kelly:.2f}x units\n"
+        msg += f"🎲 **Stake:** {kelly:.2f}x units\n"
     msg += (
-        f"**Projected Score:** {pick.get('away_team', '?')} {pick.get('projected_away_score', '?')}"
+        f"🔢 **Projected Score:** {pick.get('away_team', '?')} {pick.get('projected_away_score', '?')}"
         f" - {pick.get('home_team', '?')} {pick.get('projected_home_score', '?')}\n"
     )
 
     if odds_str:
-        msg += f"\n**Current Odds:**\n{odds_str}\n"
+        msg += f"\n📊 **Current Odds:**\n{odds_str}\n"
 
     msg += (
-        f"\n**Edge Summary:**\n"
-        f"- Pitching: {pick.get('edge_pitching', 'N/A')}\n"
-        f"- Offense: {pick.get('edge_offense', 'N/A')}\n"
-        f"- Advanced (Statcast): {pick.get('edge_advanced', 'N/A')}\n"
-        f"- Bullpen: {pick.get('edge_bullpen', 'N/A')}\n"
-        f"- Weather: {pick.get('edge_weather', 'N/A')}\n"
-        f"- Market: {pick.get('edge_market', 'N/A')}\n"
+        f"\n🔍 **Edge Summary:**\n"
+        f"⚾ Pitching: {pick.get('edge_pitching', 'N/A')}\n"
+        f"🏏 Offense: {pick.get('edge_offense', 'N/A')}\n"
+        f"📡 Advanced (Statcast): {pick.get('edge_advanced', 'N/A')}\n"
+        f"🔥 Bullpen: {pick.get('edge_bullpen', 'N/A')}\n"
+        f"🌤️ Weather: {pick.get('edge_weather', 'N/A')}\n"
+        f"💹 Market: {pick.get('edge_market', 'N/A')}\n"
     )
 
     if pick.get("notes"):
-        msg += f"\n**Notes:** {pick['notes']}\n"
+        msg += f"\n📝 **Notes:** {pick['notes']}\n"
 
     return msg
 
@@ -233,20 +234,20 @@ def _format_results_message(results: dict) -> str:
     pushes = results.get("pushes", 0)
     total = wins + losses
     roi = results.get("roi", 0)
+    pick_lines = results.get("pick_lines", [])
 
-    msg = (
-        f"✅ **MLB DAILY RESULTS — {today}**\n"
-        f"\n"
-        f"**Wins:** {wins}\n"
-        f"**Losses:** {losses}\n"
-        f"**Pushes:** {pushes}\n"
-        f"**Win Rate:** {round(wins / total * 100, 1) if total > 0 else 0}%\n"
-        f"**ROI:** {roi}%\n"
-        f"\n"
-        f"**Summary:**\n"
-        f"- Best pick: {results.get('best_pick', 'N/A')}\n"
-        f"- Worst miss: {results.get('worst_miss', 'N/A')}\n"
-        f"- Notes: {results.get('notes', 'N/A')}\n"
+    win_rate = round(wins / total * 100, 1) if total > 0 else 0
+    roi_str = f"+{roi}%" if roi > 0 else f"{roi}%"
+
+    msg = f"📊 **MLB DAILY RESULTS — {today}**\n\n"
+
+    if pick_lines:
+        msg += "\n".join(pick_lines) + "\n\n"
+
+    msg += (
+        f"**Record:** {wins}W - {losses}L"
+        + (f" - {pushes}P" if pushes else "")
+        + f"  |  **Win Rate:** {win_rate}%  |  **ROI:** {roi_str}\n"
     )
     return msg
 

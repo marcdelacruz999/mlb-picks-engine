@@ -196,6 +196,13 @@ def run_analysis(dry_run: bool = False):
             print(f"[DB] Pick already sent today for game_id={game_id} type={pick['pick_type']} — skipping.")
             continue
 
+        # Skip games that have already started or finished — prevents late launchd fires from sending stale picks
+        game_status = pick.get("analysis", {}).get("status", pick.get("status", "Scheduled"))
+        pre_game_statuses = {"Scheduled", "Pre-Game", "Warmup", "Delayed Start"}
+        if game_status not in pre_game_statuses:
+            print(f"  ⏭️  {pick['game']} — skipping send ({game_status}, game already started/finished)")
+            continue
+
         # Save pick
         pick_record = {
             "game_id": game_id,
@@ -526,6 +533,7 @@ def run_results():
     wins, losses, pushes = 0, 0, 0
     best_pick = None
     worst_miss = None
+    pick_lines = []  # list of (emoji, label) for Discord
 
     conn = db.get_connection()
 
@@ -626,8 +634,15 @@ def run_results():
         else:
             pushes += 1
 
-        print(f"  {'✅' if status == 'won' else '❌' if status == 'lost' else '➖'} "
-              f"{pick['pick_team']} ({pick['pick_type']}) — {status.upper()}")
+        emoji = "✅" if status == "won" else "❌" if status == "lost" else "➖"
+        pick_type = pick["pick_type"]
+        if pick_type in ("over", "under"):
+            label = f"{pick_type.upper()} — {pick.get('notes', '').replace('Total line: ', 'O/U ').split('|')[0].strip()}"
+        else:
+            label = f"{pick['pick_team']} ({pick_type.replace('_', ' ').upper()})"
+        pick_lines.append(f"{emoji} {label}")
+
+        print(f"  {emoji} {pick['pick_team']} ({pick_type}) — {status.upper()}")
 
     conn.close()
 
@@ -705,6 +720,7 @@ def run_results():
         "best_pick": best_pick.get("pick_team", "N/A") if best_pick else "N/A",
         "worst_miss": worst_miss.get("pick_team", "N/A") if worst_miss else "N/A",
         "notes": f"{total} graded picks",
+        "pick_lines": pick_lines,
     }
 
     db.save_daily_results(results)
