@@ -169,6 +169,7 @@ def init_db():
         ou_odds INTEGER,
         status TEXT DEFAULT 'pending' CHECK(status IN ('pending','won','lost','push','cancelled')),
         discord_sent INTEGER DEFAULT 0,
+        discord_message_id TEXT,
         created_at TEXT,
         updated_at TEXT,
         FOREIGN KEY (game_id) REFERENCES games(id)
@@ -328,6 +329,13 @@ def init_db():
     """)
 
     conn.commit()
+
+    # Migration: add discord_message_id to picks if missing
+    try:
+        conn.execute("ALTER TABLE picks ADD COLUMN discord_message_id TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
     # Migrate existing DB: add ev_score if not present
     try:

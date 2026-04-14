@@ -128,6 +128,15 @@ def fresh_db(tmp_path, monkeypatch):
     return db_path
 
 
+def test_picks_table_has_discord_message_id_column(fresh_db):
+    """picks table must have discord_message_id column."""
+    import sqlite3
+    conn = sqlite3.connect(fresh_db)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(picks)").fetchall()]
+    conn.close()
+    assert "discord_message_id" in cols
+
+
 def test_picks_table_accepts_f5_ml_pick_type(fresh_db):
     """picks table must accept f5_ml, f5_over, f5_under without CHECK constraint error."""
     conn = sqlite3.connect(fresh_db)
