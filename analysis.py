@@ -1036,8 +1036,8 @@ def _project_score(game: dict, odds_data: dict) -> dict:
         elif temp_f > 85:
             wx_multiplier += 0.04   # hot, ball carries
     if wind_mph >= 10:
-        out_dirs = {"out to CF", "out to LF", "out to RF", "out", "Out"}
-        in_dirs  = {"in from CF", "in from LF", "in from RF", "in", "In"}
+        out_dirs = {"E", "SE", "NE"}   # compass dirs from _wind_direction_label() — blowing toward OF
+        in_dirs  = {"W", "SW", "NW"}
         if wind_dir in out_dirs:
             wx_multiplier += min(0.10, wind_mph * 0.004)   # hitter-friendly
         elif wind_dir in in_dirs:
@@ -1171,7 +1171,7 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     elif park_factor <= 0.92:
         edge_desc += f" | 🏟️ Pitcher's park ({home_abbr} pf={park_factor:.2f})"
 
-    return {"pick": pick, "confidence": int(conf), "edge": edge_desc, "total_line": total_line}
+    return {"pick": pick, "confidence": int(round(conf)), "edge": edge_desc, "total_line": total_line}
 
 
 def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float) -> "dict | None":
