@@ -143,77 +143,88 @@ from unittest.mock import patch, MagicMock
 import data_mlb
 
 
-def _make_boxscore_response():
-    """Minimal MLB API schedule+boxscore response for one game."""
+def _make_schedule_response():
+    """Minimal MLB schedule API response listing one Final game."""
     return {
         "dates": [{
             "date": "2026-04-11",
             "games": [{
                 "gamePk": 823480,
                 "status": {"abstractGameState": "Final"},
-                "teams": {
-                    "away": {
-                        "team": {"id": 109},
-                        "pitchers": [662253, 681911],
-                        "players": {
-                            "ID662253": {
-                                "person": {"id": 662253, "fullName": "Zac Gallen"},
-                                "stats": {"pitching": {
-                                    "inningsPitched": "6.2", "earnedRuns": 2,
-                                    "strikeOuts": 7, "baseOnBalls": 2,
-                                    "hits": 5, "homeRuns": 1
-                                }}
-                            },
-                            "ID681911": {
-                                "person": {"id": 681911, "fullName": "Joe Mantiply"},
-                                "stats": {"pitching": {
-                                    "inningsPitched": "1.1", "earnedRuns": 0,
-                                    "strikeOuts": 1, "baseOnBalls": 0,
-                                    "hits": 1, "homeRuns": 0
-                                }}
-                            }
-                        },
-                        "teamStats": {
-                            "batting": {
-                                "runs": 3, "hits": 7, "homeRuns": 1,
-                                "strikeOuts": 9, "baseOnBalls": 2,
-                                "leftOnBase": 6, "atBats": 30
-                            }
-                        }
-                    },
-                    "home": {
-                        "team": {"id": 143},
-                        "pitchers": [669302],
-                        "players": {
-                            "ID669302": {
-                                "person": {"id": 669302, "fullName": "Ranger Suarez"},
-                                "stats": {"pitching": {
-                                    "inningsPitched": "9.0", "earnedRuns": 3,
-                                    "strikeOuts": 8, "baseOnBalls": 1,
-                                    "hits": 7, "homeRuns": 0
-                                }}
-                            }
-                        },
-                        "teamStats": {
-                            "batting": {
-                                "runs": 4, "hits": 8, "homeRuns": 0,
-                                "strikeOuts": 7, "baseOnBalls": 3,
-                                "leftOnBase": 8, "atBats": 31
-                            }
-                        }
-                    }
-                }
             }]
         }]
     }
 
 
-def test_collect_boxscores_returns_pitcher_and_team_logs():
-    mock_resp = MagicMock()
-    mock_resp.raise_for_status = MagicMock()
-    mock_resp.json.return_value = _make_boxscore_response()
+def _make_boxscore_response():
+    """Minimal MLB /game/{pk}/boxscore response (teams-level, no dates wrapper)."""
+    return {
+        "teams": {
+            "away": {
+                "team": {"id": 109},
+                "pitchers": [662253, 681911],
+                "players": {
+                    "ID662253": {
+                        "person": {"id": 662253, "fullName": "Zac Gallen"},
+                        "stats": {"pitching": {
+                            "inningsPitched": "6.2", "earnedRuns": 2,
+                            "strikeOuts": 7, "baseOnBalls": 2,
+                            "hits": 5, "homeRuns": 1
+                        }}
+                    },
+                    "ID681911": {
+                        "person": {"id": 681911, "fullName": "Joe Mantiply"},
+                        "stats": {"pitching": {
+                            "inningsPitched": "1.1", "earnedRuns": 0,
+                            "strikeOuts": 1, "baseOnBalls": 0,
+                            "hits": 1, "homeRuns": 0
+                        }}
+                    }
+                },
+                "teamStats": {
+                    "batting": {
+                        "runs": 3, "hits": 7, "homeRuns": 1,
+                        "strikeOuts": 9, "baseOnBalls": 2,
+                        "leftOnBase": 6, "atBats": 30
+                    }
+                }
+            },
+            "home": {
+                "team": {"id": 143},
+                "pitchers": [669302],
+                "players": {
+                    "ID669302": {
+                        "person": {"id": 669302, "fullName": "Ranger Suarez"},
+                        "stats": {"pitching": {
+                            "inningsPitched": "9.0", "earnedRuns": 3,
+                            "strikeOuts": 8, "baseOnBalls": 1,
+                            "hits": 7, "homeRuns": 0
+                        }}
+                    }
+                },
+                "teamStats": {
+                    "batting": {
+                        "runs": 4, "hits": 8, "homeRuns": 0,
+                        "strikeOuts": 7, "baseOnBalls": 3,
+                        "leftOnBase": 8, "atBats": 31
+                    }
+                }
+            }
+        }
+    }
 
-    with patch("data_mlb.requests.get", return_value=mock_resp):
+
+def test_collect_boxscores_returns_pitcher_and_team_logs():
+    # collect_boxscores makes two requests: schedule first, then per-game boxscore
+    sched_resp = MagicMock()
+    sched_resp.raise_for_status = MagicMock()
+    sched_resp.json.return_value = _make_schedule_response()
+
+    box_resp = MagicMock()
+    box_resp.raise_for_status = MagicMock()
+    box_resp.json.return_value = _make_boxscore_response()
+
+    with patch("data_mlb.requests.get", side_effect=[sched_resp, box_resp]):
         result = data_mlb.collect_boxscores("2026-04-11")
 
     assert "pitcher_logs" in result
@@ -247,12 +258,13 @@ def test_collect_boxscores_returns_pitcher_and_team_logs():
 
 
 def test_collect_boxscores_skips_non_final_games():
-    response = _make_boxscore_response()
-    response["dates"][0]["games"][0]["status"]["abstractGameState"] = "Live"
+    # Schedule returns a Live game → no boxscore calls made
+    sched = _make_schedule_response()
+    sched["dates"][0]["games"][0]["status"]["abstractGameState"] = "Live"
 
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    mock_resp.json.return_value = response
+    mock_resp.json.return_value = sched
 
     with patch("data_mlb.requests.get", return_value=mock_resp):
         result = data_mlb.collect_boxscores("2026-04-11")

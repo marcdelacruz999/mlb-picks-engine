@@ -2,6 +2,7 @@ import os, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
+from datetime import date as dt
 import database as db
 
 
@@ -56,7 +57,7 @@ def test_save_analysis_log(tmp_db):
 
 def test_get_today_analysis_log(tmp_db):
     entry = {
-        "game_date": "2026-04-11",
+        "game_date": dt.today().isoformat(),
         "mlb_game_id": 999002,
         "game": "A @ B",
         "away_team": "A", "home_team": "B",
@@ -125,6 +126,11 @@ def test_run_results_grades_analysis_log(tmp_db, monkeypatch):
 
     monkeypatch.setattr(engine, "fetch_todays_games", lambda: fake_final)
     monkeypatch.setattr(db, "get_today_picks", lambda: [])
+    monkeypatch.setattr(db, "collect_batter_boxscores", lambda d: 0)
+    monkeypatch.setattr(engine, "_fetch_verified_score", lambda game_id: None)
+
+    import data_mlb
+    monkeypatch.setattr(data_mlb, "collect_boxscores", lambda d: {"pitcher_logs": [], "team_logs": []})
 
     engine.run_results()
 

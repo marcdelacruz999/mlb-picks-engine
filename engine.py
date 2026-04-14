@@ -17,6 +17,7 @@ import sys
 import json
 import requests
 from datetime import date, datetime
+from typing import Optional
 
 import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
@@ -468,6 +469,29 @@ def _parse_total_line(notes: str) -> float:
     return float(match.group(1)) if match else 0.0
 
 
+def _fetch_verified_score(mlb_game_id: int) -> Optional[dict]:
+    """
+    Cross-check score via the individual game boxscore endpoint.
+    Returns {away_score, home_score} or None on error / game not final.
+    Used to validate schedule-endpoint scores before grading.
+    """
+    try:
+        url = f"https://statsapi.mlb.com/api/v1/game/{mlb_game_id}/boxscore"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        bs = resp.json()
+        away = bs.get("teams", {}).get("away", {}).get("teamStats", {}).get("batting", {})
+        home = bs.get("teams", {}).get("home", {}).get("teamStats", {}).get("batting", {})
+        away_r = away.get("runs")
+        home_r = home.get("runs")
+        if away_r is None or home_r is None:
+            return None
+        return {"away_score": int(away_r), "home_score": int(home_r)}
+    except Exception as e:
+        print(f"[DATA] Score cross-check error for game {mlb_game_id}: {e}")
+        return None
+
+
 def _fetch_f5_linescore(mlb_game_id: int) -> dict:
     """Fetch linescore for a completed game. Returns {} on error."""
     try:
@@ -527,8 +551,7 @@ def run_results():
     # Get today's picks
     picks = db.get_today_picks()
     if not picks:
-        print("\nNo picks were made today. Nothing to grade.")
-        return
+        print("\nNo picks were made today — grading model accuracy only.")
 
     wins, losses, pushes = 0, 0, 0
     best_pick = None
@@ -560,9 +583,17 @@ def run_results():
         if not result:
             continue
 
-        # Grade the pick
+        # Grade the pick — cross-check score via boxscore endpoint
         away_score = result.get("away_score", 0) or 0
         home_score = result.get("home_score", 0) or 0
+        verified = _fetch_verified_score(mlb_game_id)
+        if verified:
+            if verified["away_score"] != away_score or verified["home_score"] != home_score:
+                print(f"  ⚠️  Score mismatch game {mlb_game_id}: "
+                      f"schedule={away_score}-{home_score}, "
+                      f"boxscore={verified['away_score']}-{verified['home_score']} → using boxscore")
+                away_score = verified["away_score"]
+                home_score = verified["home_score"]
         total_runs = away_score + home_score
 
         # Update game scores in DB
@@ -664,6 +695,14 @@ def run_results():
 
         away_score = result.get("away_score", 0) or 0
         home_score = result.get("home_score", 0) or 0
+        verified = _fetch_verified_score(mlb_game_id)
+        if verified:
+            if verified["away_score"] != away_score or verified["home_score"] != home_score:
+                print(f"  ⚠️  Score mismatch game {mlb_game_id}: "
+                      f"schedule={away_score}-{home_score}, "
+                      f"boxscore={verified['away_score']}-{verified['home_score']} → using boxscore")
+                away_score = verified["away_score"]
+                home_score = verified["home_score"]
         total_runs = away_score + home_score
 
         # Grade ML prediction
