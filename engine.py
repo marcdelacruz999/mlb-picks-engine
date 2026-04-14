@@ -235,17 +235,17 @@ def run_analysis(dry_run: bool = False):
         print(f"\n  📦 Webhook payload for: {pick['game']}")
         print(export_payload(pick))
 
-    # ── Daily ML Model Board (send/update every 3 hours) ──
+    # ── Daily ML Model Board (send/update every 1 hour) ──
     today = date.today().isoformat()
-    if db.board_needs_update(today, interval_hours=3):
+    if db.board_needs_update(today, interval_hours=1):
         board_record = db.get_daily_board(today)
         existing_id = board_record["message_id"] if board_record else None
         message_id = send_daily_board(analyses, existing_message_id=existing_id)
         if message_id:
             db.save_daily_board(today, message_id)
 
-    # ── Daily O/U Model Board (send/update every 3 hours) ──
-    if db.ou_board_needs_update(today, interval_hours=3):
+    # ── Daily O/U Model Board (send/update every 1 hour) ──
+    if db.ou_board_needs_update(today, interval_hours=1):
         ou_board_record = db.get_daily_ou_board(today)
         existing_ou_id = ou_board_record["message_id"] if ou_board_record else None
         ou_message_id = send_ou_board(analyses, existing_message_id=existing_ou_id)
