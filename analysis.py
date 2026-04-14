@@ -924,6 +924,15 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
         "Lineup TBD ⏳ — re-analysis will fire when confirmed"
     )
 
+    # Hard-cap confidence when SPs are unknown — starter is the heaviest weighted
+    # factor; a TBD pitcher means the pitching agent scored 0.0 (neutral) on bad data.
+    away_pitcher_known = game.get("away_pitcher_name", "TBD") not in ("TBD", "", None)
+    home_pitcher_known = game.get("home_pitcher_name", "TBD") not in ("TBD", "", None)
+    if not away_pitcher_known and not home_pitcher_known:
+        confidence = min(confidence, 1)  # both TBD — unpickable
+    elif not away_pitcher_known or not home_pitcher_known:
+        confidence = min(confidence, 3)  # one TBD — heavily penalized
+
     # Penalize confidence when lineups not yet posted — offense agent scored on
     # projected/average lineup, not actual. -1 point keeps borderline picks
     # from going out on incomplete data; they'll re-qualify once lineups confirm.
