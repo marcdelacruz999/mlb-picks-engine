@@ -286,12 +286,9 @@ def _format_daily_board(analyses: list) -> str:
     pt_now = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%-I:%M %p PT")
 
     lines = [
-        f"⚾ **MLB MONEYLINE MODEL BOARD — {today}**",
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"📊 **ALL {len(analyses)} GAMES — ML Picks & Confidence**",
-        f"```",
-        f"{'Game':<32} {'ML Pick':<20} {'Conf'}",
-        f"{'─'*32} {'─'*20} {'─'*6}",
+        f"⚾ **MLB ML PICKS — {today}**",
+        f"📊 {len(analyses)} games · sorted by confidence",
+        f"",
     ]
 
     # Sort by confidence descending
@@ -303,12 +300,8 @@ def _format_daily_board(analyses: list) -> str:
         away = a.get("away_team", "?")
         home = a.get("home_team", "?")
 
-        # Shorten team names for table fit
         away_short = away.split()[-1] if away else "?"
         home_short = home.split()[-1] if home else "?"
-        game_str = f"{away_short} @ {home_short}"
-
-        # Shorten pick team too
         pick_short = pick_team.split()[-1] if pick_team else "?"
 
         # Emoji tier
@@ -317,15 +310,15 @@ def _format_daily_board(analyses: list) -> str:
         elif conf >= 7:
             tier = "✅"
         elif conf >= 6:
-            tier = "➡️ "
+            tier = "➡️"
         else:
-            tier = "⚠️ "
+            tier = "⚠️"
 
-        lines.append(f"{tier} {game_str:<30} {pick_short:<20} {conf}/10")
+        lines.append(f"{tier} {away_short} @ {home_short} · 👉 {pick_short} · {conf}/10")
 
-    lines.append("```")
+    lines.append("")
     lines.append("🔥 Strong (8-10) · ✅ Qualified (7) · ➡️ Below threshold · ⚠️ Lean only")
-    lines.append(f"🕐 *Updated {pt_now} — board refreshes every 3 hrs as lineups confirm*")
+    lines.append(f"🕐 *Updated {pt_now} · refreshes every 3 hrs*")
     return "\n".join(lines)
 
 
