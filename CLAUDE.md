@@ -9,8 +9,7 @@
 
 | Time | Command | What it does |
 |------|---------|--------------|
-| 8:00 AM | `engine.py` | Full analysis — sends approved picks to Discord |
-| 11am/1pm/3pm/5pm | `engine.py --refresh` | Re-validates picks; cancel/reduce alerts if edge changed |
+| 8:00 AM–5:00 PM (hourly) | `engine.py` | Full re-analysis every hour — dedup blocks resends, lineup penalty (-1 conf) holds borderline picks until lineups confirm |
 | 11:00 PM | `engine.py --results` | Grades picks vs final scores; auto-runs `collect_boxscores()` |
 | Every 30 min | `monitor.py` | Pitcher scratch monitor — Discord alert on SP change |
 | 11:30 PM | `optimizer.py` | Daily optimizer — analyzes data, implements one improvement (7-day code cooldown) |

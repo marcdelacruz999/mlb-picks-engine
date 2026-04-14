@@ -920,9 +920,15 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     home_lineup_confirmed = game.get("home_lineup_confirmed", False)
     away_lineup_confirmed = game.get("away_lineup_confirmed", False)
     lineups_confirmed = home_lineup_confirmed and away_lineup_confirmed
-    lineup_status = "Lineups confirmed" if lineups_confirmed else (
-        "Lineup TBD — monitor before first pitch"
+    lineup_status = "Lineups confirmed ✅" if lineups_confirmed else (
+        "Lineup TBD ⏳ — re-analysis will fire when confirmed"
     )
+
+    # Penalize confidence when lineups not yet posted — offense agent scored on
+    # projected/average lineup, not actual. -1 point keeps borderline picks
+    # from going out on incomplete data; they'll re-qualify once lineups confirm.
+    if not lineups_confirmed:
+        confidence = max(1, confidence - 1)
 
     # ── Assemble result ──
     analysis = {
