@@ -183,6 +183,9 @@ def _format_pick_message(pick: dict) -> str:
     if pick.get("notes"):
         msg += f"\n📝 **Notes:** {pick['notes']}\n"
 
+    now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+    msg += f"\n🔄 *Updated {now_pt.strftime('%-I:%M %p')} PT*"
+
     return msg
 
 
