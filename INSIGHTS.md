@@ -330,6 +330,11 @@ Items marked 🔲 are not yet scheduled.
 ✅ Bullpen recent ERA from game logs — done 2026-04-12
 ✅ Kelly criterion sizing — done 2026-04-12
 ✅ Opponent-adjusted rolling ERA — done 2026-04-12
+✅ Per-batter boxscore collection nightly (batter_game_logs) — done 2026-04-13
+🔲 Backfill batter data Apr 1–Apr 12 (run backfill_batter_boxscores.py)
+🔲 Per-batter rolling OPS in lineup scoring — gate: ≥3 weeks batter data (after May 1)
+🔲 K-rate signal for O/U picks — gate: ≥3 weeks batter data (after May 1)
+🔲 Hot/cold threshold calibration — gate: ≥3 weeks batter data (after May 1)
 🔲 API error handling & retry logic (data quality)
 🔲 Correlated pick cap (max 2 overs/unders/same-division)
 🔲 Pitcher velocity trends (Statcast per-game velo)
