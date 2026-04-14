@@ -44,8 +44,8 @@ class TestCalculateEv:
 
     def test_ou_ev_gate_approves_high_confidence(self):
         """High-confidence O/U pick at -110 odds should pass EV gate."""
-        # conf 8 → 80% win prob, -110 odds → EV = 0.80*(100/110) - 0.20 = 0.727 - 0.20 = +0.527
-        analysis = _make_analysis_ou(ou_pick="over", ou_confidence=8, ou_odds=-110,
+        # conf 9 → 90% win prob, -110 odds → EV = 0.90*(100/110) - 0.10 = 0.818 - 0.10 = +0.718
+        analysis = _make_analysis_ou(ou_pick="over", ou_confidence=9, ou_odds=-110,
                                      confidence=7, edge=0.15, win_prob=55.0,
                                      home_ml=-150, away_ml=130)
         result = risk_filter([analysis])

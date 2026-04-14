@@ -34,7 +34,7 @@ DATABASE_PATH = os.path.join(_DB_DIR, "mlb_picks.db")
 # ──────────────────────────────────────────────
 MAX_PICKS_PER_DAY = 20
 MIN_CONFIDENCE = 7          # 1-10 scale; only picks ≥ this are approved
-MIN_CONFIDENCE_OU = 8       # O/U requires higher bar — projected totals are rough until ≥3 weeks data
+MIN_CONFIDENCE_OU = 9       # O/U requires higher bar — gap formula only, needs ≥2.0 run gap to qualify
 MIN_EDGE_SCORE = 0.12       # minimum weighted edge to approve a pick
 MIN_EV = -0.02              # allow slightly negative EV for high-confidence plays
 OU_CONVICTION_GAP = 1.5     # projected total must differ from line by ≥ this many runs to send O/U

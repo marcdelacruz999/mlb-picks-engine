@@ -1020,6 +1020,31 @@ def _project_score(game: dict, odds_data: dict) -> dict:
     away_projected *= park_factor
     home_projected *= park_factor
 
+    # ── Weather adjustment to run total (suggestion #2) ──
+    # Temp and wind direction directly affect how many runs score —
+    # apply these to the projection, not just the ML composite score.
+    wx = game.get("weather", {})
+    temp_f = wx.get("temp_f")
+    wind_mph = wx.get("wind_mph", 0)
+    wind_dir = wx.get("wind_dir", "")
+    wx_multiplier = 1.0
+    if temp_f is not None:
+        if temp_f < 45:
+            wx_multiplier -= 0.06   # cold suppresses offense
+        elif temp_f < 55:
+            wx_multiplier -= 0.03   # cool, slightly pitcher-friendly
+        elif temp_f > 85:
+            wx_multiplier += 0.04   # hot, ball carries
+    if wind_mph >= 10:
+        out_dirs = {"out to CF", "out to LF", "out to RF", "out", "Out"}
+        in_dirs  = {"in from CF", "in from LF", "in from RF", "in", "In"}
+        if wind_dir in out_dirs:
+            wx_multiplier += min(0.10, wind_mph * 0.004)   # hitter-friendly
+        elif wind_dir in in_dirs:
+            wx_multiplier -= min(0.10, wind_mph * 0.004)   # pitcher-friendly
+    away_projected *= wx_multiplier
+    home_projected *= wx_multiplier
+
     # Blend with total line if available
     if odds_data and odds_data.get("consensus", {}).get("total_line"):
         total_line = odds_data["consensus"]["total_line"]
@@ -1040,6 +1065,20 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     """Determine if there's an over/under edge."""
     if not odds_data or not odds_data.get("consensus", {}).get("total_line"):
         return {"pick": None, "confidence": 0, "edge": "No total line available"}
+
+    # ── Suggestion #3: Block O/U when SP data is thin (<5 rolling games) ──
+    # Thin SP data = unreliable projected total
+    away_g = (game.get("away_pitcher_rolling") or {}).get("games", 0)
+    home_g = (game.get("home_pitcher_rolling") or {}).get("games", 0)
+    if away_g < 5 and home_g < 5:
+        return {"pick": None, "confidence": 0, "edge": f"SP data too thin (away {away_g}g, home {home_g}g) — O/U unreliable"}
+    elif away_g < 5 or home_g < 5:
+        thin_side = "away" if away_g < 5 else "home"
+        thin_g = away_g if away_g < 5 else home_g
+        # don't block entirely — just note it in edge, cap confidence later
+        _sp_thin_note = f"{thin_side} SP thin ({thin_g}g rolling)"
+    else:
+        _sp_thin_note = None
 
     total_line = odds_data["consensus"]["total_line"]
     model_total = projected["total"]
@@ -1093,7 +1132,45 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     if k_notes:
         edge_desc += f" | {'; '.join(k_notes)}"
 
-    return {"pick": pick, "confidence": conf, "edge": edge_desc, "total_line": total_line}
+    # ── Suggestion #3 cont: cap confidence when one SP is thin ──
+    if _sp_thin_note:
+        conf = min(conf, 7)
+        edge_desc += f" | ⚠️ {_sp_thin_note}"
+
+    # ── Suggestion #4: O/U-specific bullpen ERA signal ──
+    # Both pens hot → nudge OVER; both cold → nudge UNDER
+    home_key_rel = _analysis_db.get_bullpen_top_relievers(game.get("home_team_mlb_id"), days=7)
+    away_key_rel = _analysis_db.get_bullpen_top_relievers(game.get("away_team_mlb_id"), days=7)
+    bp_notes = []
+    if home_key_rel and away_key_rel:
+        home_bp_era = sum(r["era"] * r["total_ip"] for r in home_key_rel) / max(sum(r["total_ip"] for r in home_key_rel), 0.1)
+        away_bp_era = sum(r["era"] * r["total_ip"] for r in away_key_rel) / max(sum(r["total_ip"] for r in away_key_rel), 0.1)
+        combined_bp_era = (home_bp_era + away_bp_era) / 2
+        if combined_bp_era > 4.5:
+            if pick == "over":
+                conf = min(10, conf + 1)
+                bp_notes.append(f"Both pens shaky ({combined_bp_era:.2f} ERA, supports OVER)")
+            else:
+                bp_notes.append(f"Both pens shaky ({combined_bp_era:.2f} ERA, cuts against UNDER)")
+        elif combined_bp_era < 3.0:
+            if pick == "under":
+                conf = min(10, conf + 1)
+                bp_notes.append(f"Both pens sharp ({combined_bp_era:.2f} ERA, supports UNDER)")
+            else:
+                bp_notes.append(f"Both pens sharp ({combined_bp_era:.2f} ERA, cuts against OVER)")
+    if bp_notes:
+        edge_desc += f" | {'; '.join(bp_notes)}"
+
+    # ── Suggestion #5: Park factor tier note ──
+    # Flag high/low run-environment parks so O/U results can be tracked by tier
+    home_abbr = game.get("home_team_abbr", "")
+    park_factor = PARK_FACTORS.get(home_abbr, 1.00)
+    if park_factor >= 1.08:
+        edge_desc += f" | 🏟️ Hitter's park ({home_abbr} pf={park_factor:.2f})"
+    elif park_factor <= 0.92:
+        edge_desc += f" | 🏟️ Pitcher's park ({home_abbr} pf={park_factor:.2f})"
+
+    return {"pick": pick, "confidence": int(conf), "edge": edge_desc, "total_line": total_line}
 
 
 def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float) -> "dict | None":
