@@ -837,7 +837,13 @@ def run_results():
                 ou_emoji = "➖"
             ou_sent = any(p["pick_type"] in ("over", "under") for p in game_sent_picks)
             ou_flag = " 🎯" if ou_sent else ""
-            line += f" | {ou_emoji} {ou_pick.upper()} {ou_line_val} (Total: {total_sc}){ou_flag}"
+            if ou_status == "correct":
+                result_marker = "✓"
+            elif ou_status == "incorrect":
+                result_marker = "✗"
+            else:
+                result_marker = "push"
+            line += f" | {ou_emoji} Model: {ou_pick.upper()} {ou_line_val} → Total: {total_sc} {result_marker}{ou_flag}"
 
         all_games_lines.append(line)
 
