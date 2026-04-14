@@ -676,10 +676,23 @@ def run_results():
 
         emoji = "✅" if status == "won" else "❌" if status == "lost" else "➖"
         pick_type = pick["pick_type"]
+        away_name = result.get("away_team_name", "?")
+        home_name = result.get("home_team_name", "?")
+        matchup = f"{away_name} @ {home_name}"
+        final_score = f"Final: {away_score}-{home_score}"
+
         if pick_type in ("over", "under"):
-            label = f"{pick_type.upper()} — {pick.get('notes', '').replace('Total line: ', 'O/U ').split('|')[0].strip()}"
+            ou_line = pick.get("notes", "").replace("Total line: ", "O/U ").split("|")[0].strip()
+            model_pick = f"Model: {pick_type.upper()} {ou_line}"
+            score_context = f"{final_score}, Total: {total_runs}"
+            label = f"**{ou_line}** — {matchup} ({score_context}) — {model_pick}"
+        elif pick_type == "f5_ml":
+            model_pick = f"Model: {pick['pick_team']} F5 Win"
+            label = f"**{pick['pick_team']} F5 ML** — {matchup} ({final_score}) — {model_pick}"
         else:
-            label = f"{pick['pick_team']} ({pick_type.replace('_', ' ').upper()})"
+            model_pick = f"Model: {pick['pick_team']} ML Win"
+            label = f"**{pick['pick_team']} ML** — {matchup} ({final_score}) — {model_pick}"
+
         pick_lines.append(f"{emoji} {label}")
 
         print(f"  {emoji} {pick['pick_team']} ({pick_type}) — {status.upper()}")
