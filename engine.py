@@ -192,9 +192,14 @@ def run_analysis(dry_run: bool = False):
             print(export_payload(pick))
             continue
 
-        # Skip if a discord-sent pick already exists today for this game + pick type
-        if db.pick_already_sent_today(game_id, pick["pick_type"]):
-            print(f"[DB] Pick already sent today for game_id={game_id} type={pick['pick_type']} — skipping.")
+        # If already sent today, PATCH the existing message with fresh data
+        existing = db.get_sent_pick_today(game_id, pick["pick_type"])
+        if existing:
+            msg_id = existing.get("discord_message_id")
+            if msg_id:
+                send_pick_edit(msg_id, pick)
+            else:
+                print(f"[DB] Pick already sent for game_id={game_id} type={pick['pick_type']} but no message_id stored — skipping.")
             continue
 
         # Skip games that have already started or finished — prevents late launchd fires from sending stale picks
@@ -227,9 +232,9 @@ def run_analysis(dry_run: bool = False):
         }
         pick_id = db.save_pick(pick_record)
 
-        sent = send_pick(pick)
-        if sent:
-            db.mark_pick_sent(pick_id)
+        message_id = send_pick(pick)
+        if message_id:
+            db.mark_pick_sent(pick_id, message_id=message_id)
 
         # Print webhook payload for reference
         print(f"\n  📦 Webhook payload for: {pick['game']}")
