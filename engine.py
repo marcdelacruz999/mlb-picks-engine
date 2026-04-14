@@ -23,7 +23,7 @@ import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
 from data_odds import fetch_odds, match_odds_to_game, implied_probability, fetch_f5_odds, match_f5_odds_to_game
 from analysis import analyze_game, risk_filter, build_watchlist
-from discord_bot import send_pick, send_update, send_results, export_payload, _format_game_time
+from discord_bot import send_pick, send_update, send_results, send_daily_board, export_payload, _format_game_time
 from config import DISCORD_WEBHOOK_URL
 
 
@@ -234,6 +234,15 @@ def run_analysis(dry_run: bool = False):
         # Print webhook payload for reference
         print(f"\n  📦 Webhook payload for: {pick['game']}")
         print(export_payload(pick))
+
+    # ── Daily ML Model Board (send/update every 3 hours) ──
+    today = date.today().isoformat()
+    if db.board_needs_update(today, interval_hours=3):
+        board_record = db.get_daily_board(today)
+        existing_id = board_record["message_id"] if board_record else None
+        message_id = send_daily_board(analyses, existing_message_id=existing_id)
+        if message_id:
+            db.save_daily_board(today, message_id)
 
     # ── Tracking Snapshot ──
     _print_snapshot()

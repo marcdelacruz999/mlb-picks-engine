@@ -7,6 +7,7 @@ Sends pick alerts, updates, and daily recaps to a single Discord channel.
 import requests
 import json
 from datetime import date, datetime, timezone
+from typing import Optional
 from zoneinfo import ZoneInfo
 from config import DISCORD_WEBHOOK_URL
 
@@ -255,6 +256,98 @@ def _format_results_message(results: dict) -> str:
 # ══════════════════════════════════════════════
 #  WEBHOOK PAYLOAD EXPORT (for debugging)
 # ══════════════════════════════════════════════
+
+def _format_daily_board(analyses: list) -> str:
+    """Format the full ML model board for all games today."""
+    today = date.today().strftime("%B %d, %Y")
+    pt_now = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%-I:%M %p PT")
+
+    lines = [
+        f"⚾ **MLB MONEYLINE MODEL BOARD — {today}**",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"📊 **ALL {len(analyses)} GAMES — ML Picks & Confidence**",
+        f"```",
+        f"{'Game':<32} {'ML Pick':<20} {'Conf'}",
+        f"{'─'*32} {'─'*20} {'─'*6}",
+    ]
+
+    # Sort by confidence descending
+    sorted_analyses = sorted(analyses, key=lambda a: a.get("ml_confidence", 0), reverse=True)
+
+    for a in sorted_analyses:
+        conf = a.get("ml_confidence", 0)
+        pick_team = a.get("ml_pick_team", "?")
+        away = a.get("away_team", "?")
+        home = a.get("home_team", "?")
+
+        # Shorten team names for table fit
+        away_short = away.split()[-1] if away else "?"
+        home_short = home.split()[-1] if home else "?"
+        game_str = f"{away_short} @ {home_short}"
+
+        # Shorten pick team too
+        pick_short = pick_team.split()[-1] if pick_team else "?"
+
+        # Emoji tier
+        if conf >= 8:
+            tier = "🔥"
+        elif conf >= 7:
+            tier = "✅"
+        elif conf >= 6:
+            tier = "➡️ "
+        else:
+            tier = "⚠️ "
+
+        lines.append(f"{tier} {game_str:<30} {pick_short:<20} {conf}/10")
+
+    lines.append("```")
+    lines.append("🔥 Strong (8-10) · ✅ Qualified (7) · ➡️ Below threshold · ⚠️ Lean only")
+    lines.append(f"🕐 *Updated {pt_now} — board refreshes every 3 hrs as lineups confirm*")
+    return "\n".join(lines)
+
+
+def send_daily_board(analyses: list, existing_message_id: Optional[str] = None) -> Optional[str]:
+    """
+    Send or update the daily ML model board on Discord.
+    If existing_message_id is provided, patches the existing message in-place.
+    Returns the Discord message ID on success, None on failure.
+    """
+    if not DISCORD_WEBHOOK_URL:
+        print("[DISCORD] No webhook URL — printing board locally.")
+        print(_format_daily_board(analyses))
+        return None
+
+    content = _format_daily_board(analyses)
+    payload = {"content": content}
+
+    try:
+        if existing_message_id:
+            # PATCH existing message via webhook messages endpoint
+            patch_url = f"{DISCORD_WEBHOOK_URL}/messages/{existing_message_id}"
+            resp = requests.patch(patch_url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                print(f"[DISCORD] Board updated (message {existing_message_id})")
+                return existing_message_id
+            else:
+                print(f"[DISCORD] Board patch failed ({resp.status_code}): {resp.text}")
+                # Fall through to send a new message
+        # Send new message with ?wait=true to get message ID back
+        resp = requests.post(
+            f"{DISCORD_WEBHOOK_URL}?wait=true",
+            json=payload,
+            timeout=10
+        )
+        if resp.status_code == 200:
+            message_id = resp.json().get("id")
+            print(f"[DISCORD] Board sent (message {message_id})")
+            return message_id
+        else:
+            print(f"[DISCORD] Board send failed ({resp.status_code}): {resp.text}")
+            return None
+    except Exception as e:
+        print(f"[DISCORD] Error sending board: {e}")
+        return None
+
 
 def export_payload(pick: dict) -> str:
     """Export the webhook JSON payload for a pick (useful for debugging)."""

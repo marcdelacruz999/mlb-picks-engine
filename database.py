@@ -7,6 +7,7 @@ Tracks teams, picks, results, and ROI over time.
 import sqlite3
 import os
 from datetime import datetime, date, timedelta
+from typing import Optional
 from config import DATABASE_PATH
 
 # DB_PATH is the authoritative path used by get_connection().
@@ -296,6 +297,14 @@ def init_db():
         strikeouts INTEGER,
         created_at TEXT,
         UNIQUE(mlb_game_id, batter_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_board (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_date TEXT UNIQUE,
+        message_id TEXT,
+        sent_at TEXT,
+        updated_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
@@ -1256,3 +1265,44 @@ def get_batter_rolling_ops(batter_id: int, days: int = 15) -> "dict | None":
     ops = round(obp + slg, 3)
 
     return {"ops": ops, "games": row["games"]}
+
+
+# ── Daily Board ────────────────────────────────────────────
+
+def get_daily_board(game_date: str) -> Optional[dict]:
+    """Return today's board record (message_id + timestamps) or None."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM daily_board WHERE game_date=?", (game_date,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_daily_board(game_date: str, message_id: str) -> None:
+    """Insert or update today's board record with the Discord message ID."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    conn.execute("""
+        INSERT INTO daily_board (game_date, message_id, sent_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(game_date) DO UPDATE SET
+            message_id=excluded.message_id,
+            updated_at=excluded.updated_at
+    """, (game_date, message_id, now, now))
+    conn.commit()
+    conn.close()
+
+
+def board_needs_update(game_date: str, interval_hours: int = 3) -> bool:
+    """Return True if board hasn't been sent yet today or was last sent >interval_hours ago."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT updated_at FROM daily_board WHERE game_date=?", (game_date,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return True
+    last = datetime.fromisoformat(row["updated_at"])
+    hours_elapsed = (datetime.utcnow() - last).total_seconds() / 3600
+    return hours_elapsed >= interval_hours
