@@ -743,6 +743,11 @@ def run_results():
     else:
         print("[DATA] No boxscore data collected.")
 
+    # ── Collect and store per-batter boxscore data ──
+    print("[DATA] Collecting per-batter boxscore data...")
+    batter_inserted = db.collect_batter_boxscores(date.today().isoformat())
+    print(f"[DB] Stored {batter_inserted} batter game log rows.")
+
 
 def run_game_analysis(query: str):
     """
