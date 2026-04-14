@@ -482,14 +482,29 @@ def update_pick_status(pick_id: int, status: str):
     conn.close()
 
 
-def mark_pick_sent(pick_id: int):
-    """Mark a pick as sent to Discord."""
+def mark_pick_sent(pick_id: int, message_id: Optional[str] = None):
+    """Mark a pick as sent to Discord, optionally storing the message ID."""
     conn = get_connection()
     conn.execute(
-        "UPDATE picks SET discord_sent=1 WHERE id=?", (pick_id,)
+        "UPDATE picks SET discord_sent=1, discord_message_id=? WHERE id=?",
+        (message_id, pick_id)
     )
     conn.commit()
     conn.close()
+
+
+def get_sent_pick_today(game_id: int, pick_type: str) -> Optional[dict]:
+    """Return the discord-sent pick for this game+type today, or None."""
+    conn = get_connection()
+    today = date.today().isoformat()
+    row = conn.execute(
+        "SELECT id, discord_message_id, confidence FROM picks "
+        "WHERE game_id=? AND pick_type=? AND discord_sent=1 AND created_at LIKE ? "
+        "ORDER BY id DESC LIMIT 1",
+        (game_id, pick_type, f"{today}%")
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def save_analysis_log(entry: dict) -> int:

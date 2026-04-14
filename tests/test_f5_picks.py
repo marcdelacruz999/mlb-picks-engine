@@ -176,3 +176,42 @@ def test_grade_f5_pick_from_linescore():
     linescore["innings"][4]["home"]["runs"] = 3  # home gets 4 total in F5
     assert _grade_f5_pick("f5_home", linescore) == "won"
     assert _grade_f5_pick("f5_away", linescore) == "lost"
+
+
+def test_mark_pick_sent_stores_message_id(fresh_db):
+    """mark_pick_sent should store the discord_message_id."""
+    import sqlite3
+    import database as _db
+    _db.init_db()
+
+    # Insert a game row first
+    conn = sqlite3.connect(fresh_db)
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        "INSERT INTO games (mlb_game_id, game_date, status) VALUES (?,?,?)",
+        (999, "2026-04-14", "scheduled")
+    )
+    conn.commit()
+    game_id = conn.execute("SELECT id FROM games WHERE mlb_game_id=999").fetchone()[0]
+
+    conn.execute("""
+        INSERT INTO picks
+        (game_id, pick_type, pick_team, confidence, win_probability, edge_score,
+         projected_away_score, projected_home_score,
+         edge_pitching, edge_offense, edge_advanced, edge_bullpen, edge_weather, edge_market,
+         notes, ev_score, ml_odds, ou_odds, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (game_id, "moneyline", "Yankees", 8, 62.0, 0.15,
+          3.2, 4.1, "", "", "", "", "", "", "", 0.05, -130, None, now, now))
+    conn.commit()
+    pick_id = conn.execute("SELECT id FROM picks ORDER BY id DESC LIMIT 1").fetchone()[0]
+    conn.close()
+
+    _db.mark_pick_sent(pick_id, message_id="1234567890")
+
+    conn = sqlite3.connect(fresh_db)
+    row = conn.execute("SELECT discord_sent, discord_message_id FROM picks WHERE id=?", (pick_id,)).fetchone()
+    conn.close()
+    assert row[0] == 1
+    assert row[1] == "1234567890"
