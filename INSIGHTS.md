@@ -339,6 +339,7 @@ Items marked 🔲 are not yet scheduled.
 ✅ All 3 pre-existing test failures fixed — done 2026-04-14 (138/138 passing)
 ✅ Hourly full re-analysis 8AM–5PM (10 runs/day) — done 2026-04-14 (replaced 4 --refresh plists)
 ✅ Lineup TBD confidence penalty -1 — done 2026-04-14 (borderline conf=7 picks held until lineups confirm)
+✅ Daily ML model board — done 2026-04-14 (full game table sent to Discord, edits in-place every 3hrs)
 🔲 Hot/cold threshold calibration — gate: ≥3 weeks batter data (check: SELECT COUNT(DISTINCT game_date) FROM analysis_log WHERE ml_status != 'pending')
 ✅ Raise O/U MIN_CONFIDENCE_OU to 8 (from 7) — done 2026-04-14
 ✅ O/U conviction gap gate ≥1.5 runs — done 2026-04-14 (OU_CONVICTION_GAP in config.py)
@@ -356,6 +357,7 @@ Items marked 🔲 are not yet scheduled.
 | 2026-04-14 | Tightened O/U gates immediately | MIN_CONFIDENCE_OU=8, OU_CONVICTION_GAP=1.5 runs — yesterday's losing under (gap=0.5) would have been blocked |
 | 2026-04-14 | Switched from --refresh to hourly full runs | Full re-analysis catches new picks as lineups confirm; dedup prevents Discord spam |
 | 2026-04-14 | Lineup TBD penalty -1 confidence | Holds borderline picks (conf=7 TBD → 6) until actual lineup posts; strong plays (8+) still go out immediately |
+| 2026-04-14 | Daily ML board updates in-place every 3h | One Discord message per day patched via PATCH /messages/{id}; shows all games sorted by confidence with tier emojis |
 
 ---
 
