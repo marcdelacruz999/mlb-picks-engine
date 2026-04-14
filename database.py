@@ -307,6 +307,14 @@ def init_db():
         updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS daily_ou_board (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_date TEXT UNIQUE,
+        message_id TEXT,
+        sent_at TEXT,
+        updated_at TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
     CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
@@ -1320,6 +1328,45 @@ def board_needs_update(game_date: str, interval_hours: int = 3) -> bool:
     conn = get_connection()
     row = conn.execute(
         "SELECT updated_at FROM daily_board WHERE game_date=?", (game_date,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return True
+    last = datetime.fromisoformat(row["updated_at"])
+    hours_elapsed = (datetime.utcnow() - last).total_seconds() / 3600
+    return hours_elapsed >= interval_hours
+
+
+def get_daily_ou_board(game_date: str) -> Optional[dict]:
+    """Return today's O/U board record (message_id + timestamps) or None."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM daily_ou_board WHERE game_date=?", (game_date,)
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def save_daily_ou_board(game_date: str, message_id: str) -> None:
+    """Insert or update today's O/U board record with the Discord message ID."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    conn.execute("""
+        INSERT INTO daily_ou_board (game_date, message_id, sent_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(game_date) DO UPDATE SET
+            message_id=excluded.message_id,
+            updated_at=excluded.updated_at
+    """, (game_date, message_id, now, now))
+    conn.commit()
+    conn.close()
+
+
+def ou_board_needs_update(game_date: str, interval_hours: int = 3) -> bool:
+    """Return True if O/U board hasn't been sent today or was last sent >interval_hours ago."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT updated_at FROM daily_ou_board WHERE game_date=?", (game_date,)
     ).fetchone()
     conn.close()
     if not row:

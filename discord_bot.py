@@ -365,6 +365,96 @@ def send_daily_board(analyses: list, existing_message_id: Optional[str] = None) 
         return None
 
 
+def _format_ou_board(analyses: list) -> str:
+    """Format the full O/U model board for all games today."""
+    today = date.today().strftime("%B %d, %Y")
+    pt_now = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%-I:%M %p PT")
+
+    lines = [
+        f"🎯 **MLB O/U PICKS — {today}**",
+        f"📊 {len(analyses)} games · sorted by O/U confidence",
+        f"",
+    ]
+
+    # Sort by O/U confidence descending
+    sorted_analyses = sorted(
+        analyses,
+        key=lambda a: (a.get("ou_pick") or {}).get("confidence", 0),
+        reverse=True
+    )
+
+    for a in sorted_analyses:
+        ou = a.get("ou_pick") or {}
+        conf = ou.get("confidence", 0)
+        pick = ou.get("pick")        # "over" / "under" / None
+        line = ou.get("total_line")
+        away = a.get("away_team", "?")
+        home = a.get("home_team", "?")
+
+        away_short = away.split()[-1] if away else "?"
+        home_short = home.split()[-1] if home else "?"
+
+        if conf >= 9:
+            tier = "🔥"
+        elif conf >= 7:
+            tier = "✅"
+        elif conf >= 6:
+            tier = "➡️"
+        else:
+            tier = "⚠️"
+
+        if pick and line:
+            pick_str = f"👉 {'OVER' if pick == 'over' else 'UNDER'} {line}"
+        elif pick:
+            pick_str = f"👉 {'OVER' if pick == 'over' else 'UNDER'}"
+        else:
+            pick_str = "👉 No pick"
+
+        conf_str = f"{conf}/10" if conf else "—"
+        lines.append(f"{tier} {away_short} @ {home_short} · {pick_str} · {conf_str}")
+
+    lines.append("")
+    lines.append("🔥 9-10 · ✅ 7-8 · ➡️ 6 · ⚠️ ≤5")
+    lines.append(f"🕐 *Updated {pt_now} · refreshes every 3 hrs*")
+    return "\n".join(lines)
+
+
+def send_ou_board(analyses: list, existing_message_id: Optional[str] = None) -> Optional[str]:
+    """Send or update the daily O/U board to Discord. Returns message ID."""
+    if not DISCORD_WEBHOOK_URL:
+        print("[DISCORD] No webhook URL — printing O/U board locally.")
+        print(_format_ou_board(analyses))
+        return None
+
+    content = _format_ou_board(analyses)
+    payload = {"content": content}
+
+    try:
+        if existing_message_id:
+            patch_url = f"{DISCORD_WEBHOOK_URL}/messages/{existing_message_id}"
+            resp = requests.patch(patch_url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                print(f"[DISCORD] O/U board updated (message {existing_message_id})")
+                return existing_message_id
+            else:
+                print(f"[DISCORD] O/U board patch failed ({resp.status_code}): {resp.text}")
+        resp = requests.post(
+            f"{DISCORD_WEBHOOK_URL}?wait=true",
+            json=payload,
+            timeout=10
+        )
+        if resp.status_code == 200:
+            message_id = resp.json().get("id")
+            print(f"[DISCORD] O/U board sent (message {message_id})")
+            return message_id
+        else:
+            print(f"[DISCORD] O/U board send failed ({resp.status_code}): {resp.text}")
+            return None
+    except Exception as e:
+        print(f"[DISCORD] Error sending O/U board: {e}")
+        return None
+
+
 def export_payload(pick: dict) -> str:
     """Export the webhook JSON payload for a pick (useful for debugging)."""
     payload = {"content": _format_pick_message(pick)}

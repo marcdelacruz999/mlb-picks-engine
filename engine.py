@@ -23,7 +23,7 @@ import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
 from data_odds import fetch_odds, match_odds_to_game, implied_probability, fetch_f5_odds, match_f5_odds_to_game
 from analysis import analyze_game, risk_filter, build_watchlist
-from discord_bot import send_pick, send_update, send_results, send_daily_board, export_payload, _format_game_time
+from discord_bot import send_pick, send_update, send_results, send_daily_board, send_ou_board, export_payload, _format_game_time
 from config import DISCORD_WEBHOOK_URL
 
 
@@ -243,6 +243,14 @@ def run_analysis(dry_run: bool = False):
         message_id = send_daily_board(analyses, existing_message_id=existing_id)
         if message_id:
             db.save_daily_board(today, message_id)
+
+    # ── Daily O/U Model Board (send/update every 3 hours) ──
+    if db.ou_board_needs_update(today, interval_hours=3):
+        ou_board_record = db.get_daily_ou_board(today)
+        existing_ou_id = ou_board_record["message_id"] if ou_board_record else None
+        ou_message_id = send_ou_board(analyses, existing_message_id=existing_ou_id)
+        if ou_message_id:
+            db.save_daily_ou_board(today, ou_message_id)
 
     # ── Tracking Snapshot ──
     _print_snapshot()
@@ -868,10 +876,68 @@ def run_results():
 
     print(f"\n  Record: {wins}W - {losses}L - {pushes}P  |  ROI: {roi}%")
 
-    # Send recap to Discord
+    # Send ML recap to Discord
     sent = send_results(results)
     if sent:
         print("  📤 Results recap sent to Discord.")
+
+    # ── Send O/U results board (all games with O/U pick + outcome) ──
+    ou_results_lines = []
+    for entry in log_entries:
+        away = entry.get("away_team", "?")
+        home = entry.get("home_team", "?")
+        away_short = away.split()[-1] if away else "?"
+        home_short = home.split()[-1] if home else "?"
+        ou_pick = entry.get("ou_pick")
+        ou_line_val = entry.get("ou_line")
+        ou_status = entry.get("ou_status", "none")
+        away_sc = entry.get("actual_away_score")
+        home_sc = entry.get("actual_home_score")
+        total_sc = (away_sc + home_sc) if (away_sc is not None and home_sc is not None) else None
+
+        if not ou_pick or not ou_line_val:
+            continue
+
+        ou_emoji = "🔼" if ou_pick == "over" else "🔽"
+        if ou_status == "correct":
+            marker = "✅"
+        elif ou_status == "incorrect":
+            marker = "❌"
+        elif ou_status == "push":
+            marker = "➖"
+        else:
+            marker = "⏳"
+
+        total_str = f"→ Total: {total_sc}" if total_sc is not None else ""
+        ou_results_lines.append(
+            f"{marker} {away_short} @ {home_short} · {ou_emoji} {'OVER' if ou_pick == 'over' else 'UNDER'} {ou_line_val} {total_str}"
+        )
+
+    if ou_results_lines:
+        from datetime import date as _date
+        from zoneinfo import ZoneInfo as _ZI
+        from datetime import datetime as _dt
+        today_str = _date.today().strftime("%B %d, %Y")
+        pt_now = _dt.now(_ZI("America/Los_Angeles")).strftime("%-I:%M %p PT")
+        ou_results_msg = f"🎯 **MLB O/U RESULTS — {today_str}**\n\n"
+        ou_results_msg += "\n".join(ou_results_lines)
+        ou_results_msg += f"\n\n**O/U:** {log_ou_correct}W - {log_ou_incorrect}L"
+        if log_ou_correct + log_ou_incorrect > 0:
+            ou_pct = round(log_ou_correct / (log_ou_correct + log_ou_incorrect) * 100, 1)
+            ou_results_msg += f" ({ou_pct}%)"
+        ou_results_msg += f"\n🕐 *Final — {pt_now}*"
+
+        import requests as _req
+        if DISCORD_WEBHOOK_URL:
+            try:
+                resp = _req.post(f"{DISCORD_WEBHOOK_URL}?wait=true",
+                                 json={"content": ou_results_msg}, timeout=10)
+                if resp.status_code == 200:
+                    print("  📤 O/U results board sent to Discord.")
+                else:
+                    print(f"  [DISCORD] O/U results send failed ({resp.status_code})")
+            except Exception as e:
+                print(f"  [DISCORD] O/U results error: {e}")
 
     # ── Collect and store post-game boxscore data ──
     print("\n[DATA] Collecting post-game boxscore data...")
