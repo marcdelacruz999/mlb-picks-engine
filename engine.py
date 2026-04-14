@@ -799,7 +799,8 @@ def run_results():
         score_str = f"{away_sc}-{home_sc}"
 
         # ML model result
-        ml_team = entry.get("ml_pick_team", "?")
+        ml_team_full = entry.get("ml_pick_team", "?")
+        ml_team_short = ml_team_full.split()[-1] if ml_team_full else "?"
         ml_conf = entry.get("ml_confidence", 0)
         ml_status = entry.get("ml_status", "pending")
         if ml_status == "correct":
@@ -820,7 +821,7 @@ def run_results():
 
         line = (
             f"{ml_emoji} **{matchup}** — Final: {score_str} | "
-            f"Model: {ml_team} ({ml_conf}/10){pick_flag}"
+            f"{ml_team_short} WIN {ml_conf}/10{pick_flag}"
         )
 
         # O/U model result (if model had an O/U call)
