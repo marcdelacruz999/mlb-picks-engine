@@ -506,7 +506,28 @@ def save_analysis_log(entry: dict) -> int:
     conn.commit()
     row_id = c.lastrowid
     if not row_id:
-        # Row already existed (INSERT OR IGNORE no-op) — return existing id
+        # Row already existed (INSERT OR IGNORE no-op) — update analysis fields
+        # but preserve ml_status/ou_status grading columns
+        conn.execute("""
+            UPDATE analysis_log SET
+                away_pitcher=?, home_pitcher=?, composite_score=?,
+                ml_pick_team=?, ml_win_probability=?, ml_confidence=?,
+                ou_pick=?, ou_line=?, ou_confidence=?,
+                score_pitching=?, score_offense=?, score_bullpen=?,
+                score_advanced=?, score_momentum=?, score_market=?, score_weather=?,
+                updated_at=?
+            WHERE game_date=? AND mlb_game_id=?
+        """, (
+            entry.get("away_pitcher", "TBD"), entry.get("home_pitcher", "TBD"),
+            entry.get("composite_score", 0.0),
+            entry["ml_pick_team"], entry["ml_win_probability"], entry["ml_confidence"],
+            entry.get("ou_pick"), entry.get("ou_line"), entry.get("ou_confidence"),
+            entry.get("score_pitching"), entry.get("score_offense"), entry.get("score_bullpen"),
+            entry.get("score_advanced"), entry.get("score_momentum"), entry.get("score_market"),
+            entry.get("score_weather"), now,
+            entry["game_date"], entry["mlb_game_id"]
+        ))
+        conn.commit()
         existing = conn.execute(
             "SELECT id FROM analysis_log WHERE game_date=? AND mlb_game_id=?",
             (entry["game_date"], entry["mlb_game_id"])
