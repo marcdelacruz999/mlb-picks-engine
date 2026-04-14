@@ -279,6 +279,25 @@ def init_db():
         UNIQUE(game_date, mlb_game_id)
     );
 
+    CREATE TABLE IF NOT EXISTS batter_game_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mlb_game_id INTEGER,
+        game_date TEXT,
+        batter_id INTEGER,
+        batter_name TEXT,
+        team_id INTEGER,
+        at_bats INTEGER,
+        hits INTEGER,
+        doubles INTEGER,
+        triples INTEGER,
+        home_runs INTEGER,
+        rbi INTEGER,
+        walks INTEGER,
+        strikeouts INTEGER,
+        created_at TEXT,
+        UNIQUE(mlb_game_id, batter_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
     CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
@@ -287,6 +306,8 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_pitcher_logs_pitcher ON pitcher_game_logs(pitcher_id, game_date);
     CREATE INDEX IF NOT EXISTS idx_pitcher_logs_team ON pitcher_game_logs(team_id, game_date);
     CREATE INDEX IF NOT EXISTS idx_team_logs_team ON team_game_logs(team_id, game_date);
+    CREATE INDEX IF NOT EXISTS idx_batter_logs_batter ON batter_game_logs(batter_id, game_date);
+    CREATE INDEX IF NOT EXISTS idx_batter_logs_team ON batter_game_logs(team_id, game_date);
     """)
 
     conn.commit()
@@ -998,6 +1019,166 @@ def get_opening_lines(mlb_game_id: int, game_date: str) -> "dict | None":
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ── Batter Game Logs ─────────────────────────────────────
+
+def collect_batter_boxscores(game_date: str) -> int:
+    """
+    Fetch completed boxscores for game_date and store per-batter lines.
+    Uses the same /game/{gamePk}/boxscore endpoint as collect_boxscores().
+    Skips any player with pitching stats recorded (pitchers only).
+    Returns count of rows inserted.
+    """
+    import requests
+
+    MLB_BASE = "https://statsapi.mlb.com/api/v1"
+
+    # Step 1: get list of Final game PKs for the date
+    schedule_url = f"{MLB_BASE}/schedule?sportId=1&date={game_date}&gameType=R"
+    try:
+        resp = requests.get(schedule_url, timeout=15)
+        resp.raise_for_status()
+        schedule = resp.json()
+    except Exception as e:
+        print(f"[DB] collect_batter_boxscores schedule error for {game_date}: {e}")
+        return 0
+
+    final_game_pks = [
+        game["gamePk"]
+        for date_entry in schedule.get("dates", [])
+        for game in date_entry.get("games", [])
+        if game.get("status", {}).get("abstractGameState") == "Final"
+    ]
+
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    inserted = 0
+
+    for game_pk in final_game_pks:
+        try:
+            bs_url = f"{MLB_BASE}/game/{game_pk}/boxscore"
+            resp = requests.get(bs_url, timeout=15)
+            resp.raise_for_status()
+            boxscore = resp.json()
+        except Exception as e:
+            print(f"[DB] collect_batter_boxscores boxscore error game {game_pk}: {e}")
+            continue
+
+        for side in ("away", "home"):
+            team_data = boxscore.get("teams", {}).get(side, {})
+            team_id = team_data.get("team", {}).get("id")
+            if not team_id:
+                continue
+
+            batter_ids = team_data.get("batters", [])
+            players = team_data.get("players", {})
+
+            for bid in batter_ids:
+                player = players.get(f"ID{bid}", {})
+                stats = player.get("stats", {})
+
+                # Skip pitchers: any player with recorded pitching stats
+                pitching = stats.get("pitching", {})
+                if pitching and pitching.get("inningsPitched") not in (None, "", "0.0", "0"):
+                    continue
+
+                bstats = stats.get("batting", {})
+                at_bats = bstats.get("atBats", 0) or 0
+                # Only record if batter actually had at-bats or walks (appeared at plate)
+                walks = bstats.get("baseOnBalls", 0) or 0
+                if at_bats == 0 and walks == 0:
+                    continue
+
+                try:
+                    conn.execute("""
+                        INSERT OR IGNORE INTO batter_game_logs
+                        (mlb_game_id, game_date, batter_id, batter_name, team_id,
+                         at_bats, hits, doubles, triples, home_runs, rbi, walks,
+                         strikeouts, created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        game_pk, game_date, bid,
+                        player.get("person", {}).get("fullName", "Unknown"),
+                        team_id,
+                        at_bats,
+                        bstats.get("hits", 0) or 0,
+                        bstats.get("doubles", 0) or 0,
+                        bstats.get("triples", 0) or 0,
+                        bstats.get("homeRuns", 0) or 0,
+                        bstats.get("rbi", 0) or 0,
+                        walks,
+                        bstats.get("strikeOuts", 0) or 0,
+                        now,
+                    ))
+                    if conn.execute("SELECT changes()").fetchone()[0]:
+                        inserted += 1
+                except sqlite3.DatabaseError as e:
+                    print(f"[DB] collect_batter_boxscores insert error: {e}")
+
+        import time
+        time.sleep(0.2)  # polite to the API
+
+    conn.commit()
+    conn.close()
+    print(f"[DB] collect_batter_boxscores {game_date}: {inserted} rows inserted")
+    return inserted
+
+
+def get_team_batter_hot_cold(team_id: int, days: int = 10) -> "dict | None":
+    """
+    Compute hot/cold batter counts for a team over the last N days.
+
+    A batter is "hot"  if BA >= .320 with >= 12 AB in the window.
+    A batter is "cold" if BA <= .180 with >= 12 AB in the window.
+
+    Returns:
+        {
+          "hot_count": int,
+          "cold_count": int,
+          "avg_ba_10d": float,   # team-wide BA across all qualifying batters
+          "sample_abs": int,     # total AB in window
+        }
+    Returns None if fewer than 30 total AB are available in the window.
+    """
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT batter_id, SUM(at_bats) as ab, SUM(hits) as h
+        FROM batter_game_logs
+        WHERE team_id=? AND game_date > ?
+        GROUP BY batter_id
+        HAVING ab >= 3
+    """, (team_id, cutoff)).fetchall()
+    conn.close()
+
+    if not rows:
+        return None
+
+    total_ab = sum(r["ab"] for r in rows)
+    if total_ab < 30:
+        return None
+
+    total_hits = sum(r["h"] for r in rows)
+    hot_count = 0
+    cold_count = 0
+
+    for r in rows:
+        ab = r["ab"]
+        if ab < 12:
+            continue
+        ba = r["h"] / ab
+        if ba >= 0.320:
+            hot_count += 1
+        elif ba <= 0.180:
+            cold_count += 1
+
+    return {
+        "hot_count": hot_count,
+        "cold_count": cold_count,
+        "avg_ba_10d": round(total_hits / total_ab, 3) if total_ab > 0 else 0.0,
+        "sample_abs": total_ab,
+    }
 
 
 # ── Alias for backward compatibility ─────────────────────

@@ -251,6 +251,38 @@ def score_offense(game: dict) -> dict:
     if away_lineup_ops is not None or home_lineup_ops is not None:
         edge += " (confirmed lineup)"
 
+    # ── Hot/cold batter streak adjustment ──
+    hot_cold_notes = []
+    away_team_id = game.get("away_team_id")
+    home_team_id = game.get("home_team_id")
+
+    if away_team_id is not None:
+        away_hc = _analysis_db.get_team_batter_hot_cold(away_team_id)
+        if away_hc is not None:
+            net = away_hc["hot_count"] - away_hc["cold_count"]
+            if net >= 2:
+                score -= 0.04  # away team is hot → away edge (negative = away)
+                hot_cold_notes.append(f"{away_hc['hot_count']} away batters hot (last 10d)")
+            elif -net >= 2:
+                score += 0.04  # away team is cold → home edge (positive = home)
+                hot_cold_notes.append(f"{away_hc['cold_count']} away batters cold (last 10d)")
+
+    if home_team_id is not None:
+        home_hc = _analysis_db.get_team_batter_hot_cold(home_team_id)
+        if home_hc is not None:
+            net = home_hc["hot_count"] - home_hc["cold_count"]
+            if net >= 2:
+                score += 0.04  # home team is hot → home edge
+                hot_cold_notes.append(f"{home_hc['hot_count']} home batters hot (last 10d)")
+            elif -net >= 2:
+                score -= 0.04  # home team is cold → away edge
+                hot_cold_notes.append(f"{home_hc['cold_count']} home batters cold (last 10d)")
+
+    score = _clamp(score)
+
+    if hot_cold_notes:
+        edge += f" | {'; '.join(hot_cold_notes)}"
+
     return {
         "score": round(score, 3),
         "edge": edge,
