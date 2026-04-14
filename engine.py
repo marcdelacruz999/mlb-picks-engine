@@ -192,6 +192,13 @@ def run_analysis(dry_run: bool = False):
             print(export_payload(pick))
             continue
 
+        # Skip games that have already started or finished — prevents late launchd fires from sending stale picks
+        game_status = pick.get("analysis", {}).get("status", pick.get("status", "Scheduled"))
+        pre_game_statuses = {"Scheduled", "Pre-Game", "Warmup", "Delayed Start"}
+        if game_status not in pre_game_statuses:
+            print(f"  ⏭️  {pick['game']} — skipping send ({game_status}, game already started/finished)")
+            continue
+
         # If already sent today, PATCH the existing message with fresh data
         existing = db.get_sent_pick_today(game_id, pick["pick_type"])
         if existing:
@@ -200,13 +207,6 @@ def run_analysis(dry_run: bool = False):
                 send_pick_edit(msg_id, pick)
             else:
                 print(f"[DB] Pick already sent for game_id={game_id} type={pick['pick_type']} but no message_id stored — skipping.")
-            continue
-
-        # Skip games that have already started or finished — prevents late launchd fires from sending stale picks
-        game_status = pick.get("analysis", {}).get("status", pick.get("status", "Scheduled"))
-        pre_game_statuses = {"Scheduled", "Pre-Game", "Warmup", "Delayed Start"}
-        if game_status not in pre_game_statuses:
-            print(f"  ⏭️  {pick['game']} — skipping send ({game_status}, game already started/finished)")
             continue
 
         # Save pick

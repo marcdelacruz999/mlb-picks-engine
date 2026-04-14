@@ -215,3 +215,82 @@ def test_mark_pick_sent_stores_message_id(fresh_db):
     conn.close()
     assert row[0] == 1
     assert row[1] == "1234567890"
+
+
+def test_get_sent_pick_today_returns_none_when_no_pick(fresh_db):
+    """get_sent_pick_today returns None when no pick has been sent."""
+    import database as _db
+    _db.init_db()
+    result = _db.get_sent_pick_today(game_id=999, pick_type="moneyline")
+    assert result is None
+
+
+def test_get_sent_pick_today_returns_dict_with_message_id(fresh_db):
+    """get_sent_pick_today returns dict with discord_message_id after mark_pick_sent."""
+    import sqlite3
+    import database as _db
+    _db.init_db()
+
+    conn = sqlite3.connect(fresh_db)
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        "INSERT INTO games (mlb_game_id, game_date, status) VALUES (?,?,?)",
+        (888, "2026-04-14", "scheduled")
+    )
+    conn.commit()
+    game_id = conn.execute("SELECT id FROM games WHERE mlb_game_id=888").fetchone()[0]
+    conn.execute("""
+        INSERT INTO picks
+        (game_id, pick_type, pick_team, confidence, win_probability, edge_score,
+         projected_away_score, projected_home_score,
+         edge_pitching, edge_offense, edge_advanced, edge_bullpen, edge_weather, edge_market,
+         notes, ev_score, ml_odds, ou_odds, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (game_id, "moneyline", "Red Sox", 7, 58.0, 0.13,
+          3.0, 3.5, "", "", "", "", "", "", "", 0.02, -120, None, now, now))
+    conn.commit()
+    pick_id = conn.execute("SELECT id FROM picks ORDER BY id DESC LIMIT 1").fetchone()[0]
+    conn.close()
+
+    _db.mark_pick_sent(pick_id, message_id="9876543210")
+
+    result = _db.get_sent_pick_today(game_id, "moneyline")
+    assert result is not None
+    assert result["discord_message_id"] == "9876543210"
+    assert result["confidence"] == 7
+
+
+def test_get_sent_pick_today_returns_none_for_different_pick_type(fresh_db):
+    """get_sent_pick_today returns None for a different pick_type on the same game."""
+    import sqlite3
+    import database as _db
+    _db.init_db()
+
+    conn = sqlite3.connect(fresh_db)
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+    conn.execute(
+        "INSERT INTO games (mlb_game_id, game_date, status) VALUES (?,?,?)",
+        (777, "2026-04-14", "scheduled")
+    )
+    conn.commit()
+    game_id = conn.execute("SELECT id FROM games WHERE mlb_game_id=777").fetchone()[0]
+    conn.execute("""
+        INSERT INTO picks
+        (game_id, pick_type, pick_team, confidence, win_probability, edge_score,
+         projected_away_score, projected_home_score,
+         edge_pitching, edge_offense, edge_advanced, edge_bullpen, edge_weather, edge_market,
+         notes, ev_score, ml_odds, ou_odds, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (game_id, "moneyline", "Cubs", 8, 61.0, 0.14,
+          4.0, 3.2, "", "", "", "", "", "", "", 0.03, -115, None, now, now))
+    conn.commit()
+    pick_id = conn.execute("SELECT id FROM picks ORDER BY id DESC LIMIT 1").fetchone()[0]
+    conn.close()
+
+    _db.mark_pick_sent(pick_id, message_id="1111111111")
+
+    # Should return None for "over" pick type — only "moneyline" was sent
+    result = _db.get_sent_pick_today(game_id, "over")
+    assert result is None
