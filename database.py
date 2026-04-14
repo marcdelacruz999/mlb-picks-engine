@@ -473,7 +473,7 @@ def save_analysis_log(entry: dict) -> int:
     now = datetime.utcnow().isoformat()
     ou_status = "none" if not entry.get("ou_pick") else "pending"
     c = conn.execute("""
-        INSERT OR REPLACE INTO analysis_log
+        INSERT OR IGNORE INTO analysis_log
         (game_date, mlb_game_id, game, away_team, home_team,
          away_pitcher, home_pitcher, composite_score,
          ml_pick_team, ml_win_probability, ml_confidence,
@@ -496,6 +496,13 @@ def save_analysis_log(entry: dict) -> int:
     ))
     conn.commit()
     row_id = c.lastrowid
+    if not row_id:
+        # Row already existed (INSERT OR IGNORE no-op) — return existing id
+        existing = conn.execute(
+            "SELECT id FROM analysis_log WHERE game_date=? AND mlb_game_id=?",
+            (entry["game_date"], entry["mlb_game_id"])
+        ).fetchone()
+        row_id = existing["id"] if existing else 0
     conn.close()
     return row_id
 
