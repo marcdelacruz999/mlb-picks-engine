@@ -338,9 +338,20 @@ Items marked 🔲 are not yet scheduled.
 ✅ Score cross-check via /game/{pk}/boxscore — done 2026-04-14 (warns on mismatch, boxscore wins)
 ✅ All 3 pre-existing test failures fixed — done 2026-04-14 (138/138 passing)
 🔲 Hot/cold threshold calibration — gate: ≥3 weeks batter data (check: SELECT COUNT(DISTINCT game_date) FROM analysis_log WHERE ml_status != 'pending')
+🔲 Raise O/U MIN_CONFIDENCE to 8 (from 7) — gate: ≥3 weeks O/U data; current sample too small (3 graded picks)
+🔲 O/U conviction gap gate: only send when projected total differs from line by ≥1.5 runs (current ~0.96 at edge=0.12 is noise)
 🔲 API error handling & retry logic (data quality)
 🔲 Correlated pick cap (max 2 overs/unders/same-division)
 🔲 Pitcher velocity trends (Statcast per-game velo)
+
+---
+
+## Decisions Log
+
+| Date | Decision | Rationale |
+|------|----------|-----------|
+| 2026-04-14 | Keep ML and O/U picks independent (not paired) | O/U model has only 3 graded samples; pairing would flood Discord with low-confidence calls |
+| 2026-04-14 | Defer O/U threshold tightening until ≥3 weeks data | Plan: raise MIN_CONFIDENCE O/U to 8, add 1.5-run conviction gap gate |
 
 ---
 
