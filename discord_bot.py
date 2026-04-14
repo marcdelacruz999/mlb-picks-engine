@@ -12,32 +12,59 @@ from zoneinfo import ZoneInfo
 from config import DISCORD_WEBHOOK_URL
 
 
-def send_pick(pick: dict) -> bool:
+def send_pick(pick: dict) -> Optional[str]:
     """
     Send a high-confidence pick alert to Discord.
-    Returns True if sent successfully.
+    Returns the Discord message ID on success, None on failure.
     """
     if not DISCORD_WEBHOOK_URL:
         print("[DISCORD] No webhook URL configured — printing pick locally.")
         print(_format_pick_message(pick))
-        return False
+        return None
 
     payload = {"content": _format_pick_message(pick)}
 
     try:
         resp = requests.post(
-            DISCORD_WEBHOOK_URL,
+            f"{DISCORD_WEBHOOK_URL}?wait=true",
             json=payload,
             timeout=10
         )
-        if resp.status_code == 204:
-            print(f"[DISCORD] Pick sent: {pick.get('game', '?')}")
-            return True
+        if resp.status_code == 200:
+            message_id = resp.json().get("id")
+            print(f"[DISCORD] Pick sent: {pick.get('game', '?')} (message {message_id})")
+            return message_id
         else:
             print(f"[DISCORD] Failed ({resp.status_code}): {resp.text}")
-            return False
+            return None
     except Exception as e:
         print(f"[DISCORD] Error sending pick: {e}")
+        return None
+
+
+def send_pick_edit(message_id: str, pick: dict) -> bool:
+    """
+    Edit an existing pick card in Discord in-place via PATCH.
+    Returns True if the edit succeeded.
+    """
+    if not DISCORD_WEBHOOK_URL:
+        print("[DISCORD] No webhook URL — printing pick edit locally.")
+        print(_format_pick_message(pick))
+        return False
+
+    patch_url = f"{DISCORD_WEBHOOK_URL}/messages/{message_id}"
+    payload = {"content": _format_pick_message(pick)}
+
+    try:
+        resp = requests.patch(patch_url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            print(f"[DISCORD] Pick updated: {pick.get('game', '?')} (message {message_id})")
+            return True
+        else:
+            print(f"[DISCORD] Pick edit failed ({resp.status_code}): {resp.text}")
+            return False
+    except Exception as e:
+        print(f"[DISCORD] Error editing pick: {e}")
         return False
 
 
