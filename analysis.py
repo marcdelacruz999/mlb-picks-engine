@@ -5,7 +5,7 @@ Implements the weighted decision model with all 7 agents.
 Produces confidence scores, win probabilities, and pick recommendations.
 """
 
-from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP
 from data_odds import implied_probability, find_value
 from data_mlb import fetch_lineup_batting
 import database as _analysis_db
@@ -1282,17 +1282,22 @@ def risk_filter(analyses: list) -> list:
 
         # Over/Under pick evaluation
         ou = a.get("ou_pick", {})
-        if ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE:
+        if ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE_OU:
             market_detail = a["agents"]["market"]["detail"]
             ou_odds = (market_detail.get("over_price") if ou["pick"] == "over"
                        else market_detail.get("under_price"))
             # O/U edge = line gap normalized (diff of 1.0 run ≈ edge 0.12)
             total_line = ou.get("total_line") or 0
             projected_total = a["projected_away_score"] + a["projected_home_score"]
-            ou_edge = round(abs(projected_total - total_line) / 8.0, 3) if total_line else 0
+            run_gap = abs(projected_total - total_line) if total_line else 0
+            ou_edge = round(run_gap / 8.0, 3)
             if ou_edge < MIN_EDGE_SCORE:
                 print(f"[EDGE GATE] O/U rejected: {ou['pick'].upper()} "
                       f"(ou_edge {ou_edge:.3f} < {MIN_EDGE_SCORE})")
+                continue
+            if run_gap < OU_CONVICTION_GAP:
+                print(f"[CONVICTION GATE] O/U rejected: {ou['pick'].upper()} "
+                      f"(gap {run_gap:.1f} runs < {OU_CONVICTION_GAP} required)")
                 continue
             ev_ou = _calculate_ev(ou["confidence"] / 10 * 100, ou_odds)
 

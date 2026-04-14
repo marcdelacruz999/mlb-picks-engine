@@ -127,7 +127,7 @@ def _make_analysis_ou(ou_pick, ou_confidence, ou_odds,
         "mlb_game_id": 2,
         "game_time_utc": "",
         "projected_away_score": 3.5,
-        "projected_home_score": 4.0,
+        "projected_home_score": 3.5,   # total=7.0, gap=1.5 vs line=8.5 → meets OU_CONVICTION_GAP
         "lineup_status": "TBD",
         "lineups_confirmed": False,
         "ou_pick": {
