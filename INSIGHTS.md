@@ -56,6 +56,22 @@ Notes:
 
 **Known gap:** `analysis_log` missing Apr 11–12 rows (DB was empty during those runs). ML accuracy baseline starts Apr 13.
 
+**Apr 13 bugs fixed (3 commits):**
+- EV inflation from garbage odds data (`abs(odds)<15` → return None)
+- O/U edge gate missing — added using line gap formula
+- `ou_line` always NULL in analysis_log (`"line"` → `"total_line"` key fix)
+
+**Apr 13 design change:**
+- ML and O/U are now independent picks — both sent to Discord if they pass gates
+- MAX_PICKS_PER_DAY raised 5→20
+- O/U edge_score now based on abs(projected-line)/8.0, not ML composite edge
+- Correlated pick cap task removed from optimizer queue (intentional)
+
+**Apr 13 model accuracy (day 1 baseline):**
+- ML: 7W-3L (70%) across all 10 games
+- O/U: 1W-5L (17%) — extreme high-scoring day, model skewed UNDER early season
+- Sent picks: 2-1 (LAD game pending), ATL ML miss (bullpen signal contradicted pick)
+
 **Picks sent today (with full rolling data):**
 - HOU @ SEA: OVER 7.5 (conf 7, EV +0.336)
 - ARI @ BAL: Baltimore ML (conf 7, EV +0.030)

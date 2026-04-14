@@ -1213,8 +1213,8 @@ def select_improvement(perf, model, log_issues, signal):
     # 4. Ordered code improvements — one per 7-day window, never repeat
     code_queue = [
         # Structural / risk management
-        ("api_error_handling",        "API Error Handling & Retry Logic",         TASK_API_ERROR_HANDLING),
-        ("correlated_pick_cap",       "Correlated Pick Cap",                      TASK_CORRELATED_PICK_CAP),
+        # api_error_handling — COMPLETED 2026-04-13 (retry logic in data_mlb.py + data_odds.py)
+        # correlated_pick_cap — REMOVED: ML + O/U are now intentionally independent picks (design decision 2026-04-13)
         # Per-game data collection → smarter picks over time
         ("batter_game_logs",          "Batter Game Logs & Hot/Cold Streaks",      TASK_BATTER_GAME_LOGS),
         ("pitcher_vs_team",           "Pitcher vs Team Matchup History",          TASK_PITCHER_VS_TEAM),

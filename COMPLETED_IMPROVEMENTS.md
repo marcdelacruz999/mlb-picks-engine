@@ -128,3 +128,35 @@ Each entry uses an HTML comment marker for reliable ID matching:
 **Date:** 2026-04-12
 **Commit:** feat: opponent-adjusted rolling SP ERA; Plan C complete
 **Summary:** opponent_team_id column added to pitcher_game_logs (migration + collect_boxscores population). get_pitcher_rolling_stats_adjusted() weights each start by opponent_rpg / 4.3 (league avg), using 14-day opponent R/G window. Requires >=3 opponent games or defaults weight=1.0. Used in collect_game_data() with plain fallback via `or`.
+
+---
+
+<!-- id: api_error_handling -->
+## API Error Handling & Retry Logic
+**Date:** 2026-04-13
+**Commit:** fix: add API retry logic and fix travel context date parsing bug
+**Summary:** _api_get() retry wrapper added to data_mlb.py with exponential backoff (3 retries, 2/4/8s delays). All external MLB Stats API calls routed through wrapper. data_odds.py similarly hardened. Prevents transient network failures from silently dropping game data.
+
+---
+
+<!-- id: independent_ml_ou_picks -->
+## ML and O/U Picks Are Now Independent Per Game
+**Date:** 2026-04-13
+**Commit:** feat: send ML and O/U as independent picks; raise MAX_PICKS_PER_DAY to 20; fix O/U edge scoring
+**Summary:** Previously a single game could only contribute one pick (ML or O/U, whichever ranked higher). Now both are evaluated independently and both sent to Discord if they pass gates. MAX_PICKS_PER_DAY raised from 5→20. O/U edge_score now based on line gap (abs(projected-line)/8.0) not ML composite edge. O/U edge gate enforced separately. Correlated pick cap task removed from optimizer queue — intentional design decision.
+
+---
+
+<!-- id: ou_line_bug_fix -->
+## O/U Total Line Was Saving None in analysis_log
+**Date:** 2026-04-13
+**Commit:** fix: ou_line was saving None in analysis_log (wrong key 'line' vs 'total_line'); add O/U edge gate
+**Summary:** save_analysis_log() called ou.get("line") but the O/U dict uses key "total_line". Result: ou_line was always NULL → run_results() could never grade O/U model accuracy. Fixed in both the morning run and refresh run save paths. Today's rows backfilled via team-name match against live odds.
+
+---
+
+<!-- id: ev_implausible_odds -->
+## EV Inflation from Garbage Odds Data
+**Date:** 2026-04-13
+**Commit:** fix: reject implausible O/U odds (<15 abs value) in EV calc; add O/U edge gate
+**Summary:** The Odds API occasionally returns juice like -14 (data error). _calculate_ev() now returns None for abs(odds)<15, treating it as unavailable odds → pick blocked by EV gate. Prevents EV scores like +4.7 on effectively even-money bets.
