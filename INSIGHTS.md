@@ -331,10 +331,13 @@ Items marked 🔲 are not yet scheduled.
 ✅ Kelly criterion sizing — done 2026-04-12
 ✅ Opponent-adjusted rolling ERA — done 2026-04-12
 ✅ Per-batter boxscore collection nightly (batter_game_logs) — done 2026-04-13
-🔲 Backfill batter data Apr 1–Apr 12 (run backfill_batter_boxscores.py)
-🔲 Per-batter rolling OPS in lineup scoring — gate: ≥3 weeks batter data (after May 1)
-🔲 K-rate signal for O/U picks — gate: ≥3 weeks batter data (after May 1)
-🔲 Hot/cold threshold calibration — gate: ≥3 weeks batter data (after May 1)
+✅ Backfill batter data Apr 1–Apr 12 — done 2026-04-13 (3,159 rows)
+✅ Per-batter rolling OPS in lineup scoring — done 2026-04-13
+✅ K-rate signal for O/U picks — done 2026-04-13
+✅ INSERT OR IGNORE fix in save_analysis_log — done 2026-04-14 (prevented re-run overwrites that inflated model ML; restored Apr 13 true record to 7W-3L)
+✅ Score cross-check via /game/{pk}/boxscore — done 2026-04-14 (warns on mismatch, boxscore wins)
+✅ All 3 pre-existing test failures fixed — done 2026-04-14 (138/138 passing)
+🔲 Hot/cold threshold calibration — gate: ≥3 weeks batter data (check: SELECT COUNT(DISTINCT game_date) FROM analysis_log WHERE ml_status != 'pending')
 🔲 API error handling & retry logic (data quality)
 🔲 Correlated pick cap (max 2 overs/unders/same-division)
 🔲 Pitcher velocity trends (Statcast per-game velo)
