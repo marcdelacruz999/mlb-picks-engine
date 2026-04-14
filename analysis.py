@@ -1204,11 +1204,18 @@ def risk_filter(analyses: list) -> list:
 
         # Over/Under pick evaluation
         ou = a.get("ou_pick", {})
-        if (ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE
-                and a["ml_edge_score"] >= MIN_EDGE_SCORE):
+        if ou.get("pick") and ou.get("confidence", 0) >= MIN_CONFIDENCE:
             market_detail = a["agents"]["market"]["detail"]
             ou_odds = (market_detail.get("over_price") if ou["pick"] == "over"
                        else market_detail.get("under_price"))
+            # O/U edge = line gap normalized (diff of 1.0 run ≈ edge 0.12)
+            total_line = ou.get("total_line") or 0
+            projected_total = a["projected_away_score"] + a["projected_home_score"]
+            ou_edge = round(abs(projected_total - total_line) / 8.0, 3) if total_line else 0
+            if ou_edge < MIN_EDGE_SCORE:
+                print(f"[EDGE GATE] O/U rejected: {ou['pick'].upper()} "
+                      f"(ou_edge {ou_edge:.3f} < {MIN_EDGE_SCORE})")
+                continue
             ev_ou = _calculate_ev(ou["confidence"] / 10 * 100, ou_odds)
 
             if ev_ou is not None and ev_ou < MIN_EV:
@@ -1224,7 +1231,7 @@ def risk_filter(analyses: list) -> list:
                     "pick_type": ou["pick"],
                     "confidence": ou["confidence"],
                     "win_probability": a["ml_win_probability"],
-                    "edge_score": a["ml_edge_score"],
+                    "edge_score": ou_edge,
                     "projected_away_score": a["projected_away_score"],
                     "projected_home_score": a["projected_home_score"],
                     "edge_pitching": a["agents"]["pitching"]["edge"],

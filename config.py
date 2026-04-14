@@ -32,7 +32,7 @@ DATABASE_PATH = os.path.join(_DB_DIR, "mlb_picks.db")
 # ──────────────────────────────────────────────
 # Pick Rules
 # ──────────────────────────────────────────────
-MAX_PICKS_PER_DAY = 5
+MAX_PICKS_PER_DAY = 20
 MIN_CONFIDENCE = 7          # 1-10 scale; only picks ≥ this are approved
 MIN_EDGE_SCORE = 0.12       # minimum weighted edge to approve a pick
 MIN_EV = -0.02              # allow slightly negative EV for high-confidence plays
