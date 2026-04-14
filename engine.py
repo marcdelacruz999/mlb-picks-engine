@@ -843,7 +843,7 @@ def run_results():
                 result_marker = "✗"
             else:
                 result_marker = "push"
-            line += f" | {ou_emoji} Model: {ou_pick.upper()} {ou_line_val} → Total: {total_sc} {result_marker}{ou_flag}"
+            line += f" | {ou_emoji} {ou_pick.upper()} {ou_line_val} → Total: {total_sc} {result_marker}{ou_flag}"
 
         all_games_lines.append(line)
 
