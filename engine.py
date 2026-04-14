@@ -773,6 +773,74 @@ def run_results():
 
     roi = round((wins - losses) / max(total, 1) * 100, 1)
 
+    # ── Build full-day game board for Discord ──
+    # Index sent picks by game_id for quick lookup
+    sent_picks_by_game = {}
+    for p in picks:
+        gid = p["game_id"]
+        if gid not in sent_picks_by_game:
+            sent_picks_by_game[gid] = []
+        sent_picks_by_game[gid].append(p)
+
+    all_games_lines = []
+    for entry in sorted(log_entries, key=lambda e: e.get("away_team", "")):
+        mlb_game_id = entry["mlb_game_id"]
+        result = next((fg for fg in final_games if fg["mlb_game_id"] == mlb_game_id), None)
+        if not result:
+            continue
+
+        away_name = result.get("away_team_name", entry.get("away_team", "?"))
+        home_name = result.get("home_team_name", entry.get("home_team", "?"))
+        away_sc = result.get("away_score", 0) or 0
+        home_sc = result.get("home_score", 0) or 0
+        # Use verified scores if available (already updated in DB above)
+        total_sc = away_sc + home_sc
+        matchup = f"{away_name} @ {home_name}"
+        score_str = f"{away_sc}-{home_sc}"
+
+        # ML model result
+        ml_team = entry.get("ml_pick_team", "?")
+        ml_conf = entry.get("ml_confidence", 0)
+        ml_status = entry.get("ml_status", "pending")
+        if ml_status == "correct":
+            ml_emoji = "✅"
+        elif ml_status == "incorrect":
+            ml_emoji = "❌"
+        else:
+            ml_emoji = "➖"
+
+        # Was an ML pick actually sent for this game?
+        game_row = db.get_connection().execute(
+            "SELECT id FROM games WHERE mlb_game_id=?", (mlb_game_id,)
+        ).fetchone()
+        game_id = game_row["id"] if game_row else None
+        game_sent_picks = sent_picks_by_game.get(game_id, []) if game_id else []
+        ml_sent = any(p["pick_type"] in ("moneyline", "f5_ml") for p in game_sent_picks)
+        pick_flag = " 🎯" if ml_sent else ""
+
+        line = (
+            f"{ml_emoji} **{matchup}** — Final: {score_str} | "
+            f"Model: {ml_team} ({ml_conf}/10){pick_flag}"
+        )
+
+        # O/U model result (if model had an O/U call)
+        ou_pick = entry.get("ou_pick")
+        ou_line_val = entry.get("ou_line")
+        ou_status = entry.get("ou_status", "none")
+        if ou_pick and ou_line_val:
+            if ou_status == "correct":
+                ou_emoji = "✅"
+            elif ou_status == "incorrect":
+                ou_emoji = "❌"
+            else:
+                ou_emoji = "➖"
+            ou_sent = any(p["pick_type"] in ("over", "under") for p in game_sent_picks)
+            ou_flag = " 🎯" if ou_sent else ""
+            line += f" | {ou_emoji} {ou_pick.upper()} {ou_line_val} (Total: {total_sc}){ou_flag}"
+
+        all_games_lines.append(line)
+
+    # Sent picks summary stays as the header section; full board goes after
     results = {
         "wins": wins,
         "losses": losses,
@@ -782,6 +850,7 @@ def run_results():
         "worst_miss": worst_miss.get("pick_team", "N/A") if worst_miss else "N/A",
         "notes": f"{total} graded picks",
         "pick_lines": pick_lines,
+        "all_games_lines": all_games_lines,
     }
 
     db.save_daily_results(results)

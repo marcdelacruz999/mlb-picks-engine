@@ -236,13 +236,16 @@ def _format_results_message(results: dict) -> str:
     total = wins + losses
     roi = results.get("roi", 0)
     pick_lines = results.get("pick_lines", [])
+    all_games_lines = results.get("all_games_lines", [])
 
     win_rate = round(wins / total * 100, 1) if total > 0 else 0
     roi_str = f"+{roi}%" if roi > 0 else f"{roi}%"
 
     msg = f"📊 **MLB DAILY RESULTS — {today}**\n\n"
 
+    # Sent picks with win/loss results
     if pick_lines:
+        msg += "**🎯 Today's Picks:**\n"
         msg += "\n".join(pick_lines) + "\n\n"
 
     msg += (
@@ -250,6 +253,13 @@ def _format_results_message(results: dict) -> str:
         + (f" - {pushes}P" if pushes else "")
         + f"  |  **Win Rate:** {win_rate}%  |  **ROI:** {roi_str}\n"
     )
+
+    # Full game board — all games with model ML + O/U calls
+    if all_games_lines:
+        msg += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        msg += f"**📋 All Games — Model ML Results** _(🎯 = pick sent)_\n"
+        msg += "\n".join(all_games_lines) + "\n"
+
     return msg
 
 
