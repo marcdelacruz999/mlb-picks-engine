@@ -5,7 +5,7 @@ Implements the weighted decision model with all 7 agents.
 Produces confidence scores, win probabilities, and pick recommendations.
 """
 
-from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW
 from data_odds import implied_probability, find_value
 from data_mlb import fetch_lineup_batting
 import database as _analysis_db
@@ -221,12 +221,32 @@ def score_offense(game: dict) -> dict:
         if away_lineup_ids:
             away_stats = fetch_lineup_batting(away_lineup_ids)
             if away_stats:
-                away_lineup_ops = sum(s["ops"] for s in away_stats) / len(away_stats)
+                away_ops_list = []
+                for s in away_stats:
+                    season_ops = s.get("ops", 0) or 0
+                    rolling = _analysis_db.get_batter_rolling_ops(s["player_id"])
+                    if rolling and rolling["games"] >= MIN_BATTER_GAMES:
+                        w = 0.8 if rolling["games"] >= 20 else 0.6
+                        blended = rolling["ops"] * w + season_ops * (1 - w)
+                    else:
+                        blended = season_ops
+                    away_ops_list.append(blended)
+                away_lineup_ops = sum(away_ops_list) / len(away_ops_list)
 
         if home_lineup_ids:
             home_stats = fetch_lineup_batting(home_lineup_ids)
             if home_stats:
-                home_lineup_ops = sum(s["ops"] for s in home_stats) / len(home_stats)
+                home_ops_list = []
+                for s in home_stats:
+                    season_ops = s.get("ops", 0) or 0
+                    rolling = _analysis_db.get_batter_rolling_ops(s["player_id"])
+                    if rolling and rolling["games"] >= MIN_BATTER_GAMES:
+                        w = 0.8 if rolling["games"] >= 20 else 0.6
+                        blended = rolling["ops"] * w + season_ops * (1 - w)
+                    else:
+                        blended = season_ops
+                    home_ops_list.append(blended)
+                home_lineup_ops = sum(home_ops_list) / len(home_ops_list)
 
         away_team_ops = _safe(away_b.get("ops"))
         home_team_ops = _safe(home_b.get("ops"))
@@ -1026,6 +1046,32 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
         conf = 6
     else:
         conf = 5
+
+    # ── K-rate strikeout signal ──
+    # High combined K/PA → pitching-dominated game → nudge under
+    # Low combined K/PA → contact-heavy game → nudge over
+    away_team_id = game.get("away_team_id")
+    home_team_id = game.get("home_team_id")
+    k_notes = []
+    if away_team_id is not None and home_team_id is not None:
+        away_krate = _analysis_db.get_team_rolling_k_rate(away_team_id)
+        home_krate = _analysis_db.get_team_rolling_k_rate(home_team_id)
+        if away_krate is not None and home_krate is not None:
+            combined_krate = (away_krate + home_krate) / 2
+            if combined_krate >= OU_K_RATE_THRESHOLD_HIGH:
+                if pick == "under":
+                    conf = min(10, conf + 0.5)
+                    k_notes.append(f"High K-rate ({combined_krate:.3f}) supports under")
+                else:
+                    k_notes.append(f"High K-rate ({combined_krate:.3f}) cuts against over")
+            elif combined_krate <= OU_K_RATE_THRESHOLD_LOW:
+                if pick == "over":
+                    conf = min(10, conf + 0.5)
+                    k_notes.append(f"Low K-rate ({combined_krate:.3f}) supports over")
+                else:
+                    k_notes.append(f"Low K-rate ({combined_krate:.3f}) cuts against under")
+    if k_notes:
+        edge_desc += f" | {'; '.join(k_notes)}"
 
     return {"pick": pick, "confidence": conf, "edge": edge_desc, "total_line": total_line}
 

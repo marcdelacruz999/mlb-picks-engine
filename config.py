@@ -37,6 +37,11 @@ MIN_CONFIDENCE = 7          # 1-10 scale; only picks ≥ this are approved
 MIN_EDGE_SCORE = 0.12       # minimum weighted edge to approve a pick
 MIN_EV = -0.02              # allow slightly negative EV for high-confidence plays
 
+# Batter data pipeline thresholds
+MIN_BATTER_GAMES = 8            # min games in batter_game_logs to use rolling OPS
+OU_K_RATE_THRESHOLD_HIGH = 0.260  # combined K/PA >= this nudges under confidence +0.5
+OU_K_RATE_THRESHOLD_LOW  = 0.190  # combined K/PA <= this nudges over confidence +0.5
+
 # ──────────────────────────────────────────────
 # Decision Model Weights  (must sum to 1.0)
 # ──────────────────────────────────────────────

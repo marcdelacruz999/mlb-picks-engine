@@ -1191,3 +1191,61 @@ def get_db_connection():
 if __name__ == "__main__":
     init_db()
     print("[DB] Tables created / verified.")
+
+
+def get_team_rolling_k_rate(team_id: int, days: int = 10) -> "float | None":
+    """
+    Compute team strikeout rate (K/PA) from batter_game_logs over last N days.
+    PA = AB + BB. Returns None if fewer than 50 PA in the window.
+    """
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT SUM(strikeouts) as k, SUM(at_bats) + SUM(walks) as pa
+        FROM batter_game_logs
+        WHERE team_id=? AND game_date > ?
+    """, (team_id, cutoff)).fetchone()
+    conn.close()
+
+    if not row or not row["pa"] or row["pa"] < 50:
+        return None
+    return round(row["k"] / row["pa"], 3)
+
+
+def get_batter_rolling_ops(batter_id: int, days: int = 15) -> "dict | None":
+    """
+    Compute rolling OPS for a batter from batter_game_logs over last N days.
+    Returns {"ops": float, "games": int} or None if insufficient data.
+    OBP = (H + BB) / (AB + BB), SLG = (H + 2B + 2*3B + 3*HR) / AB
+    """
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT
+            COUNT(DISTINCT game_date) as games,
+            SUM(at_bats) as ab,
+            SUM(hits) as h,
+            SUM(doubles) as d,
+            SUM(triples) as t,
+            SUM(home_runs) as hr,
+            SUM(walks) as bb
+        FROM batter_game_logs
+        WHERE batter_id=? AND game_date > ?
+    """, (batter_id, cutoff)).fetchone()
+    conn.close()
+
+    if not row or not row["games"] or not row["ab"] or row["ab"] == 0:
+        return None
+
+    ab = row["ab"]
+    h = row["h"] or 0
+    d = row["d"] or 0
+    t = row["t"] or 0
+    hr = row["hr"] or 0
+    bb = row["bb"] or 0
+
+    obp = (h + bb) / (ab + bb) if (ab + bb) > 0 else 0.0
+    slg = (h + d + 2 * t + 3 * hr) / ab if ab > 0 else 0.0
+    ops = round(obp + slg, 3)
+
+    return {"ops": ops, "games": row["games"]}
