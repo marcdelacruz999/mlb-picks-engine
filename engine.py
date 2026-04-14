@@ -858,6 +858,10 @@ def run_results():
         "notes": f"{total} graded picks",
         "pick_lines": pick_lines,
         "all_games_lines": all_games_lines,
+        "ml_correct": log_correct,
+        "ml_incorrect": log_incorrect,
+        "ou_correct": log_ou_correct,
+        "ou_incorrect": log_ou_incorrect,
     }
 
     db.save_daily_results(results)

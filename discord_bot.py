@@ -237,9 +237,18 @@ def _format_results_message(results: dict) -> str:
     roi = results.get("roi", 0)
     pick_lines = results.get("pick_lines", [])
     all_games_lines = results.get("all_games_lines", [])
+    ml_correct = results.get("ml_correct", 0)
+    ml_incorrect = results.get("ml_incorrect", 0)
+    ou_correct = results.get("ou_correct", 0)
+    ou_incorrect = results.get("ou_incorrect", 0)
 
     win_rate = round(wins / total * 100, 1) if total > 0 else 0
     roi_str = f"+{roi}%" if roi > 0 else f"{roi}%"
+
+    ml_total = ml_correct + ml_incorrect
+    ml_pct = round(ml_correct / ml_total * 100, 1) if ml_total > 0 else 0
+    ou_total = ou_correct + ou_incorrect
+    ou_pct = round(ou_correct / ou_total * 100, 1) if ou_total > 0 else 0
 
     msg = f"📊 **MLB DAILY RESULTS — {today}**\n\n"
 
@@ -257,8 +266,12 @@ def _format_results_message(results: dict) -> str:
     # Full game board — all games with model ML + O/U calls
     if all_games_lines:
         msg += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        msg += f"**📋 All Games — Model ML Results** _(🎯 = pick sent)_\n"
+        msg += f"**📋 All Games — Model Results** _(🎯 = pick sent)_\n"
         msg += "\n".join(all_games_lines) + "\n"
+        msg += f"\n**ML:** {ml_correct}W - {ml_incorrect}L ({ml_pct}%)"
+        if ou_total > 0:
+            msg += f"  |  **O/U:** {ou_correct}W - {ou_incorrect}L ({ou_pct}%)"
+        msg += "\n"
 
     return msg
 
