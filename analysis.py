@@ -1070,12 +1070,13 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     # Thin SP data = unreliable projected total
     away_g = (game.get("away_pitcher_rolling") or {}).get("games", 0)
     home_g = (game.get("home_pitcher_rolling") or {}).get("games", 0)
-    if away_g < 5 and home_g < 5:
+    # Only hard-block when BOTH pitchers have zero rolling games (truly no data)
+    # One thin side or early season (<5g) caps confidence but still shows projection
+    if away_g == 0 and home_g == 0:
         return {"pick": None, "confidence": 0, "edge": f"SP data too thin (away {away_g}g, home {home_g}g) — O/U unreliable"}
     elif away_g < 5 or home_g < 5:
         thin_side = "away" if away_g < 5 else "home"
         thin_g = away_g if away_g < 5 else home_g
-        # don't block entirely — just note it in edge, cap confidence later
         _sp_thin_note = f"{thin_side} SP thin ({thin_g}g rolling)"
     else:
         _sp_thin_note = None
