@@ -912,21 +912,20 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     # ── Over/Under analysis ──
     ou_pick = _analyze_over_under(game, odds_data, projected)
 
-    # ── F5 pick (strong SP edge + weak opponent bullpen) ──
+    # ── F5 pick (strong SP edge + SP's OWN team bullpen is weak) ──
     f5_odds = game.get("f5_odds", {})
+    # Logic: bet F5 when the SP is good but their own pen can't hold a lead.
     # score_bullpen() sign convention: positive = home pen stronger, negative = away pen stronger.
-    # For a home pick (pitching > 0), opponent is away — away pen is weak when bullpen score > 0
-    #   → negate so weak opponent = negative number, matching gate <= -0.10
-    # For an away pick (pitching < 0), opponent is home — home pen is weak when bullpen score < 0
-    #   → use as-is
+    # For home pick (pitching > 0): check HOME pen — weak when _bp < 0 → use _bp as-is.
+    # For away pick (pitching < 0): check AWAY pen — weak when _bp > 0 → negate to get away pen signal.
     _bp = bullpen["score"]
     if pitching["score"] > 0:
-        opponent_bullpen_score = -_bp   # home pick — away pen is the opponent
+        own_bullpen_score = _bp         # home pen (negative = weak home pen)
     elif pitching["score"] < 0:
-        opponent_bullpen_score = _bp    # away pick — home pen is the opponent
+        own_bullpen_score = -_bp        # away pen (negate: negative = weak away pen)
     else:
-        opponent_bullpen_score = 0.0    # no edge — Gate 1 will reject anyway
-    f5_pick = _analyze_f5_pick(game, f5_odds, pitching["score"], opponent_bullpen_score)
+        own_bullpen_score = 0.0         # no edge — Gate 1 will reject anyway
+    f5_pick = _analyze_f5_pick(game, f5_odds, pitching["score"], own_bullpen_score)
 
     # ── Lineup status ──
     home_lineup_confirmed = game.get("home_lineup_confirmed", False)
@@ -1204,16 +1203,16 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
 
 
 def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float,
-                     opponent_bullpen_score: float = 0.0) -> "dict | None":  # default blocks gate (> -0.10)
+                     own_bullpen_score: float = 0.0) -> "dict | None":  # default blocks gate (> -0.10)
     """
     Determine if there's an F5 (First 5 Innings) pick.
     Fires when:
       - |pitching_score| >= 0.20  (SP has a clear edge)
-      - opponent_bullpen_score <= -0.10  (opponent pen is meaningfully weak)
+      - own_bullpen_score <= -0.10  (SP's own team bullpen is weak)
 
-    The caller resolves direction: if picking home (pitching_score > 0),
-    pass away bullpen score as opponent_bullpen_score; if picking away,
-    pass home bullpen score.
+    Bet F5 when the SP is good but their own pen can't hold a lead in the full game.
+    The caller resolves direction: if picking home (pitching_score > 0), pass home
+    bullpen score as own_bullpen_score; if picking away, pass negated bullpen score.
 
     Pick format:
       {"pick": "f5_home" | "f5_away", "pick_team": str,
@@ -1231,8 +1230,8 @@ def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float,
     if abs(pitching_score) < F5_PITCHING_THRESHOLD:
         return None
 
-    # Gate 2: Opponent bullpen must be meaningfully weak
-    if opponent_bullpen_score > F5_BULLPEN_THRESHOLD:
+    # Gate 2: SP's own team bullpen must be weak (can't trust pen to hold the lead)
+    if own_bullpen_score > F5_BULLPEN_THRESHOLD:
         return None
 
     if pitching_score > 0:
@@ -1255,8 +1254,8 @@ def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float,
     else:
         conf = 7
 
-    edge = (f"F5 {direction} (pitching {pitching_score:+.3f}, opp pen {opponent_bullpen_score:+.3f}) — "
-            f"SP quality isolated, weak opponent pen neutralized")
+    edge = (f"F5 {direction} (pitching {pitching_score:+.3f}, own pen {own_bullpen_score:+.3f}) — "
+            f"SP quality isolated, own bullpen too weak to trust full game")
 
     return {
         "pick": pick,

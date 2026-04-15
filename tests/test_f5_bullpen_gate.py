@@ -21,28 +21,28 @@ F5_ODDS = {
 
 
 def test_f5_fires_when_strong_sp_and_weak_opponent_pen():
-    """F5 should fire when pitching >= 0.20 AND opponent bullpen <= -0.10."""
-    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.25, opponent_bullpen_score=-0.15)
+    """F5 should fire when SP has edge AND own team bullpen is weak (<=  -0.10)."""
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.25, own_bullpen_score=-0.15)
     assert result is not None
     assert result["pick"] == "f5_home"
     assert result["pick_type"] == "f5_ml"
 
 
 def test_f5_blocked_when_opponent_pen_is_decent():
-    """F5 should NOT fire when opponent bullpen is above -0.10 (pen not weak enough)."""
-    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.25, opponent_bullpen_score=0.05)
+    """F5 should NOT fire when own team bullpen is above -0.10 (pen not weak enough to worry)."""
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.25, own_bullpen_score=0.05)
     assert result is None
 
 
 def test_f5_blocked_when_opponent_pen_exactly_at_threshold():
-    """Boundary: bullpen == -0.10 should pass (<=)."""
-    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.25, opponent_bullpen_score=-0.10)
+    """Boundary: own_bullpen_score == -0.10 should pass (gate is > -0.10)."""
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.25, own_bullpen_score=-0.10)
     assert result is not None
 
 
 def test_f5_edge_string_includes_bullpen_context():
     """Edge string should mention both pitching score and bullpen score."""
-    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.30, opponent_bullpen_score=-0.18)
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.30, own_bullpen_score=-0.18)
     assert result is not None
     edge = result["edge"]
     assert "pen" in edge.lower() or "bullpen" in edge.lower()
@@ -51,13 +51,13 @@ def test_f5_edge_string_includes_bullpen_context():
 
 def test_f5_blocked_by_gate1_regardless_of_bullpen():
     """Gate 1: weak pitching alone blocks F5 even if bullpen is terrible."""
-    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.15, opponent_bullpen_score=-0.20)
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.15, own_bullpen_score=-0.20)
     assert result is None
 
 
 def test_f5_away_pick_direction():
-    """Away pick: negative pitching_score should produce f5_away for the away team."""
-    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=-0.25, opponent_bullpen_score=-0.15)
+    """Away pick: negative pitching_score with weak away pen fires f5_away."""
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=-0.25, own_bullpen_score=-0.15)
     assert result is not None
     assert result["pick"] == "f5_away"
     assert result["pick_team"] == "Cardinals"
