@@ -48,11 +48,11 @@ OU_K_RATE_THRESHOLD_LOW  = 0.190  # combined K/PA <= this nudges over confidence
 # Decision Model Weights  (must sum to 1.0)
 # ──────────────────────────────────────────────
 WEIGHTS = {
-    "pitching":    0.25,   # was 0.30 — backtester showed slight overweight (lift +0.080, highest but less dominant than 30% implied)
-    "offense":     0.20,   # unchanged — lift +0.041, weight roughly justified
-    "bullpen":     0.17,   # was 0.10 — backtester showed significant underweight (lift +0.050, rivals offense)
-    "advanced":    0.13,   # was 0.15 — lift near zero in backtest; likely stats-approximation artifact, small trim only
-    "momentum":    0.10,   # unchanged — not testable historically (neutral placeholder used)
+    "pitching":    0.22,   # was 0.25 — trimmed: rust-risk layoff SP + weak pen pattern caused both Apr 13-14 ML losses
+    "offense":     0.23,   # was 0.20 — bumped: 3W-0L when confirmed home lineup edge, strongest live signal
+    "bullpen":     0.20,   # was 0.17 — bumped: ERA quality matters more than stronger/weaker label alone
+    "advanced":    0.13,   # unchanged — need more data before moving
+    "momentum":    0.07,   # was 0.10 — trimmed: hard to measure, reallocated to offense+bullpen
     "weather":     0.05,   # unchanged — not testable historically (neutral placeholder used)
     "market":      0.10,   # unchanged — held constant (no historical odds data)
 }

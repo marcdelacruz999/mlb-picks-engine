@@ -944,6 +944,23 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     if not lineups_confirmed:
         confidence = max(1, confidence - 1)
 
+    # ── Rust-risk + weak bullpen cap ──
+    # Pattern identified Apr 13-14: both ML losses had (a) picked team's SP on extended
+    # layoff (>=8d rust risk) AND (b) that team's bullpen ERA > 5.0.
+    # The pitching agent scores the SP as an "advantage" even with the layoff flag,
+    # but a rusty starter + bad pen = high blowup risk. Cap at 6 (below send threshold).
+    BULLPEN_ERA_RUST_THRESHOLD = 5.0
+    _p_detail = pitching.get("detail", {})
+    _b_detail = bullpen.get("detail", {})
+    _home_rest = _p_detail.get("home_days_rest") or 0
+    _away_rest = _p_detail.get("away_days_rest") or 0
+    _home_bp_era = _b_detail.get("home_bp_era") or 0.0
+    _away_bp_era = _b_detail.get("away_bp_era") or 0.0
+    if pick_side == "home" and _home_rest >= 8 and _home_bp_era > BULLPEN_ERA_RUST_THRESHOLD:
+        confidence = min(confidence, 6)
+    elif pick_side == "away" and _away_rest >= 8 and _away_bp_era > BULLPEN_ERA_RUST_THRESHOLD:
+        confidence = min(confidence, 6)
+
     # ── Assemble result ──
     analysis = {
         "game": f"{game.get('away_team_name', '?')} @ {game.get('home_team_name', '?')}",
