@@ -410,3 +410,73 @@ def write_calibration_log(entry: dict, log_path: str = _DEFAULT_LOG_PATH) -> Non
     with open(log_path, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
+
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+MIN_APPLY_PICKS = 10
+
+
+def _update_config_weights(new_weights: dict, config_path: str = _CONFIG_PATH) -> None:
+    """
+    Rewrite the WEIGHTS dict in config.py using line-by-line replacement.
+    Matches lines like:    "pitching":    0.22,
+    Preserves comments after the value.
+    """
+    with open(config_path) as f:
+        lines = f.readlines()
+
+    updated = []
+    for line in lines:
+        replaced = False
+        for agent, value in new_weights.items():
+            # Match pattern: "agent": <spaces> <number>, optionally followed by # comment
+            pattern = rf'(\s*"{agent}":\s+)[\d.]+(\s*(?:#.*)?)'
+            m = re.match(pattern, line)
+            if m:
+                # Preserve indentation and any comment
+                formatted_value = f"{value:.2f}"
+                updated.append(f'{m.group(1)}{formatted_value},{m.group(2)}\n')
+                replaced = True
+                break
+        if not replaced:
+            updated.append(line)
+
+    with open(config_path, "w") as f:
+        f.writelines(updated)
+
+
+def apply_weights(picks: list, analysis: dict, suggested_weights: dict,
+                  current_weights: dict, dry_run: bool = False) -> dict:
+    """
+    Apply suggested weights to config.py and commit.
+    Returns dict with {applied: bool, reason: str}.
+    """
+    n = analysis["pick_count"]
+    if n < MIN_APPLY_PICKS:
+        return {"applied": False,
+                "reason": f"not enough graded picks this week ({n}) — need {MIN_APPLY_PICKS}"}
+
+    if suggested_weights == current_weights:
+        return {"applied": False, "reason": "no weight changes suggested"}
+
+    if dry_run:
+        return {"applied": False, "reason": "dry_run=True, skipped write"}
+
+    # Apply to config.py
+    _update_config_weights(suggested_weights)
+
+    # Summary for commit message
+    changes = []
+    for agent in current_weights:
+        diff = round(suggested_weights.get(agent, current_weights[agent]) - current_weights[agent], 4)
+        if abs(diff) >= 0.01:
+            changes.append(f"{agent} {diff:+.2f}")
+    summary = ", ".join(changes) if changes else "minor rebalance"
+
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    commit_msg = f"calibration: weekly weight update {date_str} — {summary}"
+
+    subprocess.run(["git", "add", "config.py"], check=True)
+    subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+
+    return {"applied": True, "reason": summary}
+

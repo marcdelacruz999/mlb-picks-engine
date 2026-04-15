@@ -337,3 +337,48 @@ def test_write_calibration_log_appends():
         assert parsed["applied"] is False
     finally:
         os.unlink(log_path)
+
+
+def test_update_config_weights_writes_correctly():
+    import tempfile, os
+    from calibrate import _update_config_weights
+
+    config_content = '''WEIGHTS = {
+    "pitching":    0.22,
+    "offense":     0.23,
+    "bullpen":     0.20,
+    "advanced":    0.13,
+    "momentum":    0.07,
+    "weather":     0.05,
+    "market":      0.10,
+}
+'''
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(config_content)
+        tmp_path = f.name
+
+    try:
+        new_weights = {"pitching": 0.20, "offense": 0.25, "bullpen": 0.20,
+                       "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+        _update_config_weights(new_weights, config_path=tmp_path)
+        result = open(tmp_path).read()
+        assert "0.20" in result  # pitching changed
+        assert "0.25" in result  # offense changed
+        # Verify original 0.23 is gone
+        assert '"offense":     0.23' not in result
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_apply_weights_requires_min_picks():
+    from calibrate import apply_weights
+    result = apply_weights(
+        picks=[],
+        analysis={"baseline_win_rate": 0.0, "signal_table": {}, "pick_count": 3,
+                   "ml_record": (2, 1), "ou_record": (0, 0)},
+        suggested_weights={"pitching": 0.22},
+        current_weights={"pitching": 0.22},
+        dry_run=True,
+    )
+    assert result["applied"] is False
+    assert "not enough" in result["reason"].lower()
