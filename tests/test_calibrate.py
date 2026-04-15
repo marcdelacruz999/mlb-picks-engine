@@ -148,3 +148,84 @@ def test_parse_signals_wind_strong():
     }
     sigs = parse_signals(pick)
     assert sigs["wind_strong"] is True
+
+
+def test_analyze_signals_win_rate():
+    from calibrate import analyze_signals
+    # 3 picks: 2 won, 1 lost. All have sp_home_advantage=True.
+    picks = [
+        {"pick_type": "moneyline", "status": "won",
+         "edge_pitching": "Home SP has clear pitching advantage over Away SP.",
+         "edge_offense": "", "edge_bullpen": "", "edge_advanced": "",
+         "edge_market": "", "edge_weather": "", "notes": "", "_pick_side": "home"},
+        {"pick_type": "moneyline", "status": "won",
+         "edge_pitching": "Home SP has clear pitching advantage over Away SP.",
+         "edge_offense": "", "edge_bullpen": "", "edge_advanced": "",
+         "edge_market": "", "edge_weather": "", "notes": "", "_pick_side": "home"},
+        {"pick_type": "moneyline", "status": "lost",
+         "edge_pitching": "Home SP has clear pitching advantage over Away SP.",
+         "edge_offense": "", "edge_bullpen": "", "edge_advanced": "",
+         "edge_market": "", "edge_weather": "", "notes": "", "_pick_side": "home"},
+    ]
+    result = analyze_signals(picks)
+    assert result["baseline_win_rate"] == round(2/3, 4)
+    sp_row = result["signal_table"]["sp_home_advantage"]
+    assert sp_row["n"] == 3
+    assert sp_row["wins"] == 2
+    assert sp_row["losses"] == 1
+    assert sp_row["win_rate"] == round(2/3, 4)
+
+
+def test_analyze_signals_min_n_filter():
+    from calibrate import analyze_signals
+    # Only 2 picks with a signal — should not appear in table (min N=3)
+    picks = [
+        {"pick_type": "moneyline", "status": "won",
+         "edge_pitching": "Home SP has clear pitching advantage over Away SP.",
+         "edge_offense": "", "edge_bullpen": "", "edge_advanced": "",
+         "edge_market": "", "edge_weather": "", "notes": "", "_pick_side": "home"},
+        {"pick_type": "moneyline", "status": "lost",
+         "edge_pitching": "Home SP has clear pitching advantage over Away SP.",
+         "edge_offense": "", "edge_bullpen": "", "edge_advanced": "",
+         "edge_market": "", "edge_weather": "", "notes": "", "_pick_side": "home"},
+    ]
+    result = analyze_signals(picks)
+    assert "sp_home_advantage" not in result["signal_table"]
+
+
+def test_suggest_weights_nudge_up():
+    from calibrate import suggest_weights
+    current = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
+               "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    # offense signal winning at 90% vs 60% baseline — should suggest +0.02 to offense
+    signal_table = {
+        "offense_home_edge": {"n": 6, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.30},
+    }
+    baseline = 0.60
+    suggestions = suggest_weights(current, signal_table, baseline, n_picks=12)
+    assert suggestions["offense"] == round(0.23 + 0.02, 4)
+
+
+def test_suggest_weights_no_change_when_low_n():
+    from calibrate import suggest_weights
+    current = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
+               "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    # offense signal only 4 picks — below N>=5 threshold for suggestions
+    signal_table = {
+        "offense_home_edge": {"n": 4, "wins": 4, "losses": 0, "win_rate": 1.0, "delta": 0.40},
+    }
+    baseline = 0.60
+    suggestions = suggest_weights(current, signal_table, baseline, n_picks=10)
+    assert suggestions == current
+
+
+def test_suggest_weights_normalizes_to_1():
+    from calibrate import suggest_weights
+    current = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
+               "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    signal_table = {
+        "offense_home_edge": {"n": 6, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.30},
+    }
+    suggestions = suggest_weights(current, signal_table, 0.60, n_picks=12)
+    total = round(sum(suggestions.values()), 4)
+    assert total == 1.0, f"Weights sum to {total}, expected 1.0"

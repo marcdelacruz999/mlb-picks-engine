@@ -149,3 +149,159 @@ def parse_signals(pick: dict) -> dict:
         "rust_weak_pen_home": rust_home,
         "rust_weak_pen_away": rust_away,
     }
+
+
+# Signals that map to each agent weight key
+_SIGNAL_TO_AGENT = {
+    "sp_home_advantage":   "pitching",
+    "sp_away_advantage":   "pitching",
+    "sp_home_layoff":      "pitching",
+    "sp_away_layoff":      "pitching",
+    "offense_home_edge":   "offense",
+    "offense_away_edge":   "offense",
+    "bullpen_home_stronger": "bullpen",
+    "bullpen_away_stronger": "bullpen",
+    "bullpen_home_era_bad":  "bullpen",
+    "bullpen_away_era_bad":  "bullpen",
+    "advanced_barrel":     "advanced",
+    "advanced_hardhit":    "advanced",
+    "advanced_xwoba":      "advanced",
+    "market_edge_low":     "market",
+    "market_edge_mid":     "market",
+    "market_edge_high":    "market",
+    "rain_flag":           "weather",
+    "wind_strong":         "weather",
+    "rust_weak_pen_home":  "pitching",
+    "rust_weak_pen_away":  "pitching",
+}
+
+MIN_SIGNAL_N = 3   # below this — noise, don't show
+MIN_SUGGEST_N = 5  # below this — don't suggest weight changes
+DIVERGE_THRESHOLD = 0.08   # signal win rate must differ by this much to trigger nudge
+NUDGE = 0.02
+MAX_NUDGE = 0.03
+MIN_TOTAL_ADJUSTMENT = 0.03  # ignore noise commits below this magnitude
+
+
+def analyze_signals(picks: list) -> dict:
+    """
+    For each signal flag, compute N, W, L, win_rate, delta vs baseline.
+    Returns {baseline_win_rate, signal_table, pick_count, ml_record, ou_record}.
+    """
+    if not picks:
+        return {"baseline_win_rate": 0.0, "signal_table": {}, "pick_count": 0,
+                "ml_record": (0, 0), "ou_record": (0, 0)}
+
+    # Baseline — all picks
+    total = len(picks)
+    total_wins = sum(1 for p in picks if p["status"] == "won")
+    baseline = round(total_wins / total, 4) if total > 0 else 0.0
+
+    # ML vs O/U records
+    ml_picks = [p for p in picks if p.get("pick_type") in ("moneyline", "f5_ml")]
+    ou_picks  = [p for p in picks if p.get("pick_type") in ("over", "under")]
+    ml_rec = (sum(1 for p in ml_picks if p["status"] == "won"),
+               sum(1 for p in ml_picks if p["status"] == "lost"))
+    ou_rec = (sum(1 for p in ou_picks if p["status"] == "won"),
+               sum(1 for p in ou_picks if p["status"] == "lost"))
+
+    # Per-signal tallies
+    tallies: dict = {}
+    for pick in picks:
+        sigs = parse_signals(pick)
+        for sig, present in sigs.items():
+            if not present:
+                continue
+            if sig not in tallies:
+                tallies[sig] = {"n": 0, "wins": 0, "losses": 0}
+            tallies[sig]["n"] += 1
+            if pick["status"] == "won":
+                tallies[sig]["wins"] += 1
+            elif pick["status"] == "lost":
+                tallies[sig]["losses"] += 1
+
+    # Build signal_table — filter by MIN_SIGNAL_N
+    signal_table = {}
+    for sig, t in tallies.items():
+        if t["n"] < MIN_SIGNAL_N:
+            continue
+        win_rate = round(t["wins"] / t["n"], 4) if t["n"] > 0 else 0.0
+        delta = round(win_rate - baseline, 4)
+        signal_table[sig] = {
+            "n": t["n"],
+            "wins": t["wins"],
+            "losses": t["losses"],
+            "win_rate": win_rate,
+            "delta": delta,
+        }
+
+    return {
+        "baseline_win_rate": baseline,
+        "signal_table": signal_table,
+        "pick_count": total,
+        "ml_record": ml_rec,
+        "ou_record": ou_rec,
+    }
+
+
+def suggest_weights(current: dict, signal_table: dict,
+                    baseline: float, n_picks: int) -> dict:
+    """
+    Suggest agent weight adjustments based on signal performance.
+    Returns a new weights dict (normalized to 1.0), or current if no changes warranted.
+    """
+    adjustments: dict = {k: 0.0 for k in current}
+
+    for sig, row in signal_table.items():
+        if row["n"] < MIN_SUGGEST_N:
+            continue
+        if abs(row["delta"]) <= DIVERGE_THRESHOLD:
+            continue
+        agent = _SIGNAL_TO_AGENT.get(sig)
+        if agent is None or agent not in current:
+            continue
+        nudge = NUDGE if row["delta"] > 0 else -NUDGE
+        adjustments[agent] += nudge
+
+    # Cap each agent adjustment at ±MAX_NUDGE
+    for agent in adjustments:
+        adjustments[agent] = max(-MAX_NUDGE, min(MAX_NUDGE, adjustments[agent]))
+
+    total_adj = sum(abs(v) for v in adjustments.values())
+    if total_adj == 0:
+        return current  # no changes at all
+
+    # Apply adjustments
+    new_weights = {k: round(current[k] + adjustments[k], 4) for k in current}
+
+    # Clamp to [0.01, 0.50] per weight
+    for k in new_weights:
+        new_weights[k] = max(0.01, min(0.50, new_weights[k]))
+
+    # Normalize to sum exactly 1.0
+    # If we added more than removed, scale other weights down proportionally
+    total = sum(new_weights.values())
+    if total > 0 and total != 1.0:
+        # Identify which weights received adjustments
+        adjusted_keys = {k for k, v in adjustments.items() if v != 0}
+        # Identify which weights didn't receive adjustments (these will be scaled)
+        other_keys = set(new_weights.keys()) - adjusted_keys
+
+        if other_keys:
+            # Scale only the non-adjusted weights
+            other_total = sum(new_weights[k] for k in other_keys)
+            if other_total > 0:
+                target_other_total = 1.0 - sum(new_weights[k] for k in adjusted_keys)
+                if target_other_total > 0:
+                    scale = target_other_total / other_total
+                    for k in other_keys:
+                        new_weights[k] = round(new_weights[k] * scale, 4)
+
+        # Fine-tune rounding to ensure sum = 1.0
+        total_after = sum(new_weights.values())
+        if total_after != 1.0:
+            diff = round(1.0 - total_after, 4)
+            largest = max(new_weights, key=lambda k: new_weights[k])
+            new_weights[largest] = round(new_weights[largest] + diff, 4)
+
+    return new_weights
