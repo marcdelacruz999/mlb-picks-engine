@@ -459,13 +459,28 @@ def pick_already_sent_today(game_id: int, pick_type: str) -> bool:
     return row is not None
 
 
-def get_today_picks() -> list:
-    """Return all discord-sent picks created today."""
+def get_picks_for_date(target_date: str) -> list:
+    """Return all discord-sent picks created on target_date (YYYY-MM-DD)."""
     conn = get_connection()
-    today = date.today().isoformat()
     rows = conn.execute(
         "SELECT * FROM picks WHERE created_at LIKE ? AND discord_sent=1 ORDER BY confidence DESC",
-        (f"{today}%",)
+        (f"{target_date}%",)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_today_picks() -> list:
+    """Return all discord-sent picks created today."""
+    return get_picks_for_date(date.today().isoformat())
+
+
+def get_pending_picks_for_date(target_date: str) -> list:
+    """Return discord-sent picks with status='pending' for target_date (YYYY-MM-DD)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM picks WHERE created_at LIKE ? AND discord_sent=1 AND status='pending' ORDER BY confidence DESC",
+        (f"{target_date}%",)
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]

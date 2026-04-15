@@ -124,7 +124,7 @@ def test_run_results_grades_analysis_log(tmp_db, monkeypatch):
         "game_date": dt.today().isoformat(),
     }]
 
-    monkeypatch.setattr(engine, "fetch_todays_games", lambda: fake_final)
+    monkeypatch.setattr(engine, "fetch_todays_games", lambda d=None: fake_final)
     monkeypatch.setattr(db, "get_today_picks", lambda: [])
     monkeypatch.setattr(db, "collect_batter_boxscores", lambda d: 0)
     monkeypatch.setattr(engine, "_fetch_verified_score", lambda game_id: None)

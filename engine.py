@@ -16,7 +16,7 @@ Usage:
 import sys
 import json
 import requests
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import database as db
@@ -555,23 +555,42 @@ def run_results():
     """
     RESULTS GRADING
     Fetch final scores, grade picks, calculate ROI, send recap.
-    """
-    print("=" * 60)
-    print(f"  MLB RESULTS — {date.today().strftime('%B %d, %Y')}")
-    print("=" * 60)
 
+    Day-boundary fallback: if the Mac wakes after midnight and today has no final
+    games yet but yesterday has pending picks, grade yesterday automatically.
+    """
     db.init_db()
 
-    # Fetch today's final scores
-    games = fetch_todays_games()
+    # Resolve the grading date — today first, fall back to yesterday if needed
+    today_str = date.today().isoformat()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+
+    games = fetch_todays_games(today_str)
     final_games = [g for g in games if "Final" in g.get("status", "")]
 
+    grading_date = today_str
     if not final_games:
-        print("\n⚠️  No final games found yet. Run again after games complete.")
-        return
+        # Check if yesterday has pending picks that never got graded
+        yesterday_pending = db.get_pending_picks_for_date(yesterday_str)
+        if yesterday_pending:
+            print(f"⚠️  No final games today — found {len(yesterday_pending)} ungraded picks "
+                  f"from {yesterday_str}. Grading yesterday instead.")
+            games = fetch_todays_games(yesterday_str)
+            final_games = [g for g in games if "Final" in g.get("status", "")]
+            grading_date = yesterday_str
+        if not final_games:
+            print("=" * 60)
+            print(f"  MLB RESULTS — {date.today().strftime('%B %d, %Y')}")
+            print("=" * 60)
+            print("\n⚠️  No final games found yet. Run again after games complete.")
+            return
 
-    # Get today's picks
-    picks = db.get_today_picks()
+    print("=" * 60)
+    print(f"  MLB RESULTS — {date.fromisoformat(grading_date).strftime('%B %d, %Y')}")
+    print("=" * 60)
+
+    # Get picks for the resolved grading date
+    picks = db.get_picks_for_date(grading_date)
     if not picks:
         print("\nNo picks were made today — grading model accuracy only.")
 
@@ -947,7 +966,7 @@ def run_results():
     # ── Collect and store post-game boxscore data ──
     print("\n[DATA] Collecting post-game boxscore data...")
     from data_mlb import collect_boxscores
-    boxscore_data = collect_boxscores(date.today().isoformat())
+    boxscore_data = collect_boxscores(grading_date)
     if boxscore_data["pitcher_logs"] or boxscore_data["team_logs"]:
         db.store_boxscores(boxscore_data["pitcher_logs"], boxscore_data["team_logs"])
         print(f"[DB] Stored {len(boxscore_data['pitcher_logs'])} pitcher lines, "
@@ -957,7 +976,7 @@ def run_results():
 
     # ── Collect and store per-batter boxscore data ──
     print("[DATA] Collecting per-batter boxscore data...")
-    batter_inserted = db.collect_batter_boxscores(date.today().isoformat())
+    batter_inserted = db.collect_batter_boxscores(grading_date)
     print(f"[DB] Stored {batter_inserted} batter game log rows.")
 
 
