@@ -286,6 +286,7 @@ def test_build_embed_structure():
     assert "Weekly Calibration" in e["title"]
     assert "9W-3L" in e["description"]
     assert "75.0%" in e["description"]
+    assert "Record:" not in e["description"]
     field_names = [f["name"] for f in e.get("fields", [])]
     assert any("SIGNAL" in n.upper() for n in field_names)
     assert any("WEIGHT" in n.upper() for n in field_names)

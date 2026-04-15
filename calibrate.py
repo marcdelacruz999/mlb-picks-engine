@@ -336,8 +336,8 @@ def build_embed(analysis: dict, current_weights: dict,
 
     ou_str = f"O/U: {ou_w}W-{ou_l}L" if (ou_w + ou_l) > 0 else "O/U: 0 graded"
     desc_line = (
-        f"Record: {ml_w}W-{ml_l}L ({bl*100:.1f}%) | "
-        f"{n} picks | ML: {ml_w}W-{ml_l}L | {ou_str}"
+        f"ML: {ml_w}W-{ml_l}L ({bl*100:.1f}%) | "
+        f"{n} picks | {ou_str}"
     )
 
     # Signal breakdown field
@@ -357,7 +357,7 @@ def build_embed(analysis: dict, current_weights: dict,
 
     # Weight suggestions field
     weights_changed = current_weights != suggested_weights
-    if weights_changed:
+    if weights_changed and n >= 10:
         wt_lines = []
         for agent in current_weights:
             cur = current_weights[agent]
