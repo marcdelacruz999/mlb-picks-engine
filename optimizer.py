@@ -484,7 +484,8 @@ def analyze_model_accuracy(days=30):
 
 def analyze_agent_signals(days=30):
     """
-    Compare avg edge value on winning vs losing picks per agent.
+    Compare avg agent score on winning vs losing picks per agent.
+    Reads real float scores from analysis_log (joined via games.mlb_game_id).
     Blends live signal with the 4,855-game backtest baseline.
 
     Blending weight:
@@ -500,10 +501,12 @@ def analyze_agent_signals(days=30):
     since = (date.today() - timedelta(days=days)).isoformat()
 
     rows = conn.execute("""
-        SELECT p.status, p.edge_pitching, p.edge_offense, p.edge_advanced,
-               p.edge_bullpen, p.edge_weather, p.edge_market
+        SELECT p.status,
+               al.score_pitching, al.score_offense, al.score_bullpen,
+               al.score_advanced, al.score_momentum, al.score_weather, al.score_market
         FROM picks p
         JOIN games g ON p.game_id = g.id
+        JOIN analysis_log al ON g.mlb_game_id = al.mlb_game_id
         WHERE g.game_date >= ? AND p.discord_sent = 1
           AND p.status IN ('won', 'lost')
     """, (since,)).fetchall()
@@ -522,26 +525,27 @@ def analyze_agent_signals(days=30):
     else:
         live_weight = 0.8
 
-    agents = ["pitching", "offense", "advanced", "bullpen", "weather", "market"]
+    agent_col = {
+        "pitching": "score_pitching",
+        "offense":  "score_offense",
+        "bullpen":  "score_bullpen",
+        "advanced": "score_advanced",
+        "momentum": "score_momentum",
+        "weather":  "score_weather",
+        "market":   "score_market",
+    }
     result = {}
 
-    for agent in agents:
-        col = f"edge_{agent}"
+    for agent, col in agent_col.items():
         won_vals, lost_vals = [], []
         for r in rows:
-            raw = r[col]
-            if raw is None:
+            val = r[col]
+            if val is None:
                 continue
-            if isinstance(raw, str):
-                m = re.search(r'[+-]?\d+\.\d+', raw)
-                if not m:
-                    continue
-                val = float(m.group())
-            else:
-                try:
-                    val = float(raw)
-                except (TypeError, ValueError):
-                    continue
+            try:
+                val = float(val)
+            except (TypeError, ValueError):
+                continue
             (won_vals if r["status"] == "won" else lost_vals).append(val)
 
         avg_won  = sum(won_vals)  / len(won_vals)  if won_vals  else 0.0
@@ -557,13 +561,13 @@ def analyze_agent_signals(days=30):
             blended = round((1 - live_weight) * bt_lift + live_weight * live_diff, 4)
 
         result[agent] = {
-            "live_differential":   live_diff,
-            "backtest_lift":       bt_lift,
+            "live_differential":    live_diff,
+            "backtest_lift":        bt_lift,
             "blended_differential": blended,
-            "differential":        blended,   # alias used by select_improvement
+            "differential":         blended,   # alias used by select_improvement
             "n_won":  len(won_vals),
             "n_lost": len(lost_vals),
-            "blend_weight_live":   live_weight,
+            "blend_weight_live":    live_weight,
         }
 
     return result
