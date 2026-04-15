@@ -88,8 +88,8 @@ def test_analyze_f5_pick_recommends_home_ml_when_home_pitching_edge():
     }
     f5_odds = {"consensus": {"home_ml": -130, "away_ml": 110,
                               "total_line": 4.5, "over_price": -115, "under_price": -105}}
-    # pitching_score > 0 means home pitching advantage
-    result = _analyze_f5_pick(game, f5_odds, pitching_score=0.30)
+    # pitching_score > 0 means home pitching advantage; opponent_bullpen_score < -0.10 passes Gate 2
+    result = _analyze_f5_pick(game, f5_odds, pitching_score=0.30, opponent_bullpen_score=-0.15)
 
     assert result["pick"] in ("f5_home", "f5_away")
     assert result["pick"] == "f5_home"

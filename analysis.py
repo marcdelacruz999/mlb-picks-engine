@@ -912,9 +912,16 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     # ── Over/Under analysis ──
     ou_pick = _analyze_over_under(game, odds_data, projected)
 
-    # ── F5 pick (only when strong pitching edge) ──
+    # ── F5 pick (strong SP edge + weak opponent bullpen) ──
     f5_odds = game.get("f5_odds", {})
-    f5_pick = _analyze_f5_pick(game, f5_odds, pitching["score"])
+    # score_bullpen() sign convention: positive = home pen stronger, negative = away pen stronger.
+    # For a home pick (pitching > 0), opponent is away — away pen is weak when bullpen score > 0
+    #   → negate so weak opponent = negative number, matching gate <= -0.10
+    # For an away pick (pitching < 0), opponent is home — home pen is weak when bullpen score < 0
+    #   → use as-is
+    _bp = bullpen["score"]
+    opponent_bullpen_score = -_bp if pitching["score"] > 0 else _bp
+    f5_pick = _analyze_f5_pick(game, f5_odds, pitching["score"], opponent_bullpen_score)
 
     # ── Lineup status ──
     home_lineup_confirmed = game.get("home_lineup_confirmed", False)
@@ -1191,11 +1198,17 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     return {"pick": pick, "confidence": int(round(conf)), "edge": edge_desc, "total_line": total_line}
 
 
-def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float) -> "dict | None":
+def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float,
+                     opponent_bullpen_score: float = 0.0) -> "dict | None":
     """
     Determine if there's an F5 (First 5 Innings) pick.
-    Only fires when pitching_score is strongly one-sided (|score| >= 0.20).
-    Returns pick dict or None.
+    Fires when:
+      - |pitching_score| >= 0.20  (SP has a clear edge)
+      - opponent_bullpen_score <= -0.10  (opponent pen is meaningfully weak)
+
+    The caller resolves direction: if picking home (pitching_score > 0),
+    pass away bullpen score as opponent_bullpen_score; if picking away,
+    pass home bullpen score.
 
     Pick format:
       {"pick": "f5_home" | "f5_away", "pick_team": str,
@@ -1209,8 +1222,12 @@ def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float) -> "dict 
     if not consensus.get("home_ml") or not consensus.get("away_ml"):
         return None
 
-    # Only recommend F5 when pitching signal is strong
+    # Gate 1: SP must have a clear edge
     if abs(pitching_score) < 0.20:
+        return None
+
+    # Gate 2: Opponent bullpen must be meaningfully weak
+    if opponent_bullpen_score > -0.10:
         return None
 
     if pitching_score > 0:
@@ -1233,8 +1250,8 @@ def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float) -> "dict 
     else:
         conf = 7
 
-    edge = (f"F5 {direction} (pitching score {pitching_score:+.3f}) — "
-            f"isolates SP quality, eliminates bullpen variance")
+    edge = (f"F5 {direction} (pitching {pitching_score:+.3f}, opp pen {opponent_bullpen_score:+.3f}) — "
+            f"SP quality isolated, weak opponent pen neutralized")
 
     return {
         "pick": pick,
