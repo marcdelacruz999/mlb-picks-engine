@@ -12,7 +12,8 @@
 | 8:00 AM–5:00 PM (hourly) | `engine.py` | Full re-analysis every hour — dedup blocks resends, lineup penalty (-1 conf) holds borderline picks until lineups confirm |
 | 11:00 PM | `engine.py --results` | Grades picks vs final scores; auto-runs `collect_boxscores()` |
 | Every 30 min | `monitor.py` | Pitcher scratch monitor — Discord alert on SP change |
-| 11:30 PM | `optimizer.py` | Daily optimizer — analyzes data, implements one improvement (7-day code cooldown) |
+| 11:30 PM | `optimizer.py` | Nightly optimizer — analyzes data, implements one improvement (7-day code cooldown) |
+| Monday 9:00 AM | `calibrate.py` | Weekly signal calibration — posts Discord report; run with `--apply` to update weights |
 
 Plists at `~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist`. Output logged to `engine.log`.
 
@@ -34,11 +35,13 @@ python3 engine.py --collect DATE  # Collect post-game boxscores for DATE (YYYY-M
 
 ## Pick Filter
 
-- Min confidence: **7/10** (`MIN_CONFIDENCE` in config.py)
+- Min confidence ML: **7/10** (`MIN_CONFIDENCE` in config.py)
+- Min confidence O/U: **9/10** (`MIN_CONFIDENCE_OU`) — gap formula only, needs ≥2.0 run gap
 - Min edge score: **0.12** (`MIN_EDGE_SCORE`)
 - Min EV: **−0.02** (`MIN_EV`)
 - Max picks/day: **5** (`MAX_PICKS_PER_DAY`)
 - Pick types: `moneyline` | `over` | `under` | `f5_ml`
+- SP TBD cap: one SP unknown → max 3/10 (ML + O/U); both unknown → max 1/10
 - If nothing qualifies → PASS, nothing sent
 
 ---
@@ -48,14 +51,20 @@ python3 engine.py --collect DATE  # Collect post-game boxscores for DATE (YYYY-M
 ```
 engine.py          — orchestrator + all CLI flags
 analysis.py        — 7 agents, kelly_stake(), _calculate_ev(), risk_filter(), _analyze_f5_pick()
+                     _analyze_over_under() — O/U with weather/bullpen/SP/park signals
 data_mlb.py        — MLB Stats API, Statcast, Open-Meteo, collect_boxscores()
 data_odds.py       — The Odds API (full-game + F5); consensus ML/RL/total logic
 discord_bot.py     — all webhook formatting and sends
+                     send_daily_board() — ML picks board (all games, refreshes every 3h)
+                     send_ou_board()    — O/U picks board (all games, refreshes every 3h)
 database.py        — SQLite — all tables, queries, rolling stats functions
+                     daily_board / daily_ou_board — board message ID tracking
 config.py          — WEIGHTS, PARK_FACTORS (30), UMPIRE_TENDENCIES (43), all thresholds
 monitor.py         — pitcher scratch monitor
 optimizer.py       — nightly improvement engine
 backtest.py        — 2024+2025 historical validator (4,855 games)
+calibrate.py       — weekly signal calibration; reads picks DB, posts Discord report, optionally applies weights
+                     entry points: --test (stdout only), --apply (write config.py + commit), --days N
 COMPLETED_IMPROVEMENTS.md  — optimizer dedup (<!-- id: xxx --> markers)
 PIPELINE.md        — full architecture + flow diagram
 INSIGHTS.md        — calibration log, bias tracker, weight tuning history
@@ -80,6 +89,12 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 **pitcher_game_logs / team_game_logs are forward-only** — `collect_boxscores()` is called nightly for yesterday only. If the DB is empty, run `backfill_boxscores.py` (project root) to populate from Apr 1 through yesterday. Safe to re-run (INSERT OR IGNORE).
 
 **DB migration** — use `except sqlite3.OperationalError: pass` (not bare `except Exception`).
+
+**analysis_log re-runs use INSERT + UPDATE** — `save_analysis_log()` inserts on first run, then UPDATE on re-runs to refresh analysis fields while preserving `ml_status`/`ou_status` grading columns. Do not revert to INSERT OR IGNORE.
+
+**O/U confidence is a float before return** — K-rate nudge adds 0.5, bullpen nudge adds 1. Always cast with `int(round(conf))` not `int(conf)` to avoid truncation.
+
+**Wind direction from MLB API is compass** — `_wind_direction_label()` returns `N/NE/E/SE/S/SW/W/NW`. Use these in both `score_weather()` and `_project_score()`. Never use `"out to CF"` style strings.
 
 ---
 
