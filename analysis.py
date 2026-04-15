@@ -273,8 +273,8 @@ def score_offense(game: dict) -> dict:
 
     # ── Hot/cold batter streak adjustment ──
     hot_cold_notes = []
-    away_team_id = game.get("away_team_id")
-    home_team_id = game.get("home_team_id")
+    away_team_id = game.get("away_team_mlb_id") or game.get("away_team_id")
+    home_team_id = game.get("home_team_mlb_id") or game.get("home_team_id")
 
     if away_team_id is not None:
         away_hc = _analysis_db.get_team_batter_hot_cold(away_team_id)
@@ -1127,8 +1127,8 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     # ── K-rate strikeout signal ──
     # High combined K/PA → pitching-dominated game → nudge under
     # Low combined K/PA → contact-heavy game → nudge over
-    away_team_id = game.get("away_team_id")
-    home_team_id = game.get("home_team_id")
+    away_team_id = game.get("away_team_mlb_id") or game.get("away_team_id")
+    home_team_id = game.get("home_team_mlb_id") or game.get("home_team_id")
     k_notes = []
     if away_team_id is not None and home_team_id is not None:
         away_krate = _analysis_db.get_team_rolling_k_rate(away_team_id)
