@@ -375,16 +375,45 @@ def test_update_config_weights_writes_correctly():
 
 def test_apply_weights_requires_min_picks():
     from calibrate import apply_weights
+    _analysis = {"baseline_win_rate": 0.0, "signal_table": {}, "pick_count": 3,
+                 "ml_record": (2, 1), "ou_record": (0, 0)}
     result = apply_weights(
         picks=[],
-        analysis={"baseline_win_rate": 0.0, "signal_table": {}, "pick_count": 3,
-                   "ml_record": (2, 1), "ou_record": (0, 0)},
+        analysis=_analysis,
+        suggested_weights={"pitching": 0.24},
+        current_weights={"pitching": 0.22},
+    )
+    assert result["applied"] is False
+    assert "not enough" in result["reason"].lower()
+
+
+def test_apply_weights_no_change_when_weights_unchanged():
+    from calibrate import apply_weights
+    _analysis = {"baseline_win_rate": 0.75, "signal_table": {}, "pick_count": 15,
+                 "ml_record": (11, 4), "ou_record": (0, 0)}
+    result = apply_weights(
+        picks=[],
+        analysis=_analysis,
         suggested_weights={"pitching": 0.22},
+        current_weights={"pitching": 0.22},
+    )
+    assert result["applied"] is False
+    assert "no weight changes" in result["reason"]
+
+
+def test_apply_weights_dry_run_skips_write():
+    from calibrate import apply_weights
+    _analysis = {"baseline_win_rate": 0.75, "signal_table": {}, "pick_count": 15,
+                 "ml_record": (11, 4), "ou_record": (0, 0)}
+    result = apply_weights(
+        picks=[],
+        analysis=_analysis,
+        suggested_weights={"pitching": 0.24},
         current_weights={"pitching": 0.22},
         dry_run=True,
     )
     assert result["applied"] is False
-    assert "not enough" in result["reason"].lower()
+    assert "dry_run" in result["reason"]
 
 
 def test_main_test_mode_no_discord(monkeypatch):

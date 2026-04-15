@@ -412,6 +412,7 @@ def write_calibration_log(entry: dict, log_path: str = _DEFAULT_LOG_PATH) -> Non
 
 
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.py")
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 MIN_APPLY_PICKS = 10
 
 
@@ -463,9 +464,6 @@ def apply_weights(picks: list, analysis: dict, suggested_weights: dict,
     if dry_run:
         return {"applied": False, "reason": "dry_run=True, skipped write"}
 
-    # Apply to config.py
-    _update_config_weights(suggested_weights)
-
     # Summary for commit message
     changes = []
     for agent in current_weights:
@@ -477,8 +475,20 @@ def apply_weights(picks: list, analysis: dict, suggested_weights: dict,
     date_str = datetime.now().strftime("%Y-%m-%d")
     commit_msg = f"calibration: weekly weight update {date_str} — {summary}"
 
-    subprocess.run(["git", "add", "config.py"], check=True)
-    subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+    # Read original content before write in case git commit fails and we need to rollback
+    with open(_CONFIG_PATH) as f:
+        original_lines = f.readlines()
+
+    _update_config_weights(suggested_weights)
+
+    try:
+        subprocess.run(["git", "add", _CONFIG_PATH], cwd=_PROJECT_ROOT, check=True)
+        subprocess.run(["git", "commit", "-m", commit_msg], cwd=_PROJECT_ROOT, check=True)
+    except subprocess.CalledProcessError as exc:
+        # Roll back config.py so the engine doesn't run with uncommitted weight changes
+        with open(_CONFIG_PATH, "w") as f:
+            f.writelines(original_lines)
+        return {"applied": False, "reason": f"git commit failed: {exc}"}
 
     return {"applied": True, "reason": summary}
 
@@ -508,6 +518,8 @@ def main(argv=None):
     payload = build_embed(analysis, current_weights, suggested_weights, week_label)
 
     if args.test:
+        if args.apply:
+            print("NOTE: --apply ignored in --test mode")
         e = payload["embeds"][0]
         print(e["title"])
         print(e["description"])
