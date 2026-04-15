@@ -152,6 +152,8 @@ def parse_signals(pick: dict) -> dict:
 
 
 # Signals that map to each agent weight key
+# Note: 'momentum' agent has no stable text signal in edge_* fields — weight frozen.
+# 'lineup_confirmed' maps to no agent (informational only).
 _SIGNAL_TO_AGENT = {
     "sp_home_advantage":   "pitching",
     "sp_away_advantage":   "pitching",
@@ -269,7 +271,7 @@ def suggest_weights(current: dict, signal_table: dict,
 
     total_adj = sum(abs(v) for v in adjustments.values())
     if total_adj < MIN_TOTAL_ADJUSTMENT:
-        return current  # below noise threshold
+        return dict(current)  # return copy to avoid mutation hazard
 
     # Apply adjustments
     new_weights = {k: round(current[k] + adjustments[k], 4) for k in current}
@@ -278,30 +280,18 @@ def suggest_weights(current: dict, signal_table: dict,
     for k in new_weights:
         new_weights[k] = max(0.01, min(0.50, new_weights[k]))
 
-    # Normalize to sum exactly 1.0
-    # If we added more than removed, scale other weights down proportionally
+    # Normalize to sum exactly 1.0 using proportional scaling
     total = sum(new_weights.values())
-    if total > 0 and total != 1.0:
-        # Identify which weights received adjustments
-        adjusted_keys = {k for k, v in adjustments.items() if v != 0}
-        # Identify which weights didn't receive adjustments (these will be scaled)
-        other_keys = set(new_weights.keys()) - adjusted_keys
-
-        if other_keys:
-            # Scale only the non-adjusted weights
-            other_total = sum(new_weights[k] for k in other_keys)
-            if other_total > 0:
-                target_other_total = 1.0 - sum(new_weights[k] for k in adjusted_keys)
-                if target_other_total > 0:
-                    scale = target_other_total / other_total
-                    for k in other_keys:
-                        new_weights[k] = round(new_weights[k] * scale, 4)
-
-        # Fine-tune rounding to ensure sum = 1.0
+    if abs(total - 1.0) > 1e-9:
+        scale = 1.0 / total
+        for k in new_weights:
+            new_weights[k] = round(new_weights[k] * scale, 4)
+        # One-shot rounding correction
         total_after = sum(new_weights.values())
-        if total_after != 1.0:
+        if abs(total_after - 1.0) > 1e-9:
             diff = round(1.0 - total_after, 4)
             largest = max(new_weights, key=lambda k: new_weights[k])
             new_weights[largest] = round(new_weights[largest] + diff, 4)
 
     return new_weights
+

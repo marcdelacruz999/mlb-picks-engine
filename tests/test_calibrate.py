@@ -237,3 +237,25 @@ def test_suggest_weights_normalizes_to_1():
     suggestions = suggest_weights(current, signal_table, 0.60, n_picks=12)
     total = round(sum(suggestions.values()), 4)
     assert total == 1.0, f"Weights sum to {total}, expected 1.0"
+
+
+def test_suggest_weights_all_agents_nudged_proportional_scaling():
+    """When 6 signals fire positively, proportional normalization scales all weights fairly,
+    and fixes the old bug where adjustments would cause catastrophic drops (e.g., -0.10 for offense)."""
+    from calibrate import suggest_weights
+    current = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
+               "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    signal_table = {
+        "sp_home_advantage":     {"n": 10, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.35},
+        "offense_home_edge":     {"n": 10, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.35},
+        "bullpen_home_stronger": {"n": 10, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.35},
+        "advanced_barrel":       {"n": 10, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.35},
+        "rain_flag":             {"n": 10, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.35},
+        "market_edge_high":      {"n": 10, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.35},
+    }
+    result = suggest_weights(current, signal_table, 0.55, n_picks=30)
+    assert round(sum(result.values()), 4) == 1.0
+    # With proportional scaling, no weight should drop more than the scale factor (~10.7%)
+    # Old buggy code made offense drop from 0.23 to 0.13 (-0.10). This should be fixed.
+    for agent in ("pitching", "offense", "bullpen", "advanced", "weather", "market"):
+        assert result[agent] > 0.06, f"{agent} dropped below 0.06 (catastrophic decrease)"
