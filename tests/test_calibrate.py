@@ -132,9 +132,9 @@ def test_parse_signals_market_buckets():
             "edge_advanced": "", "edge_market": market_text,
             "edge_weather": "", "notes": "", "_pick_side": "home",
         }
-    assert parse_signals(_pick("Market edge: 1.5%"))["market_edge_low"] is True
-    assert parse_signals(_pick("Market edge: 3.0%"))["market_edge_mid"] is True
-    assert parse_signals(_pick("Market edge: 5.2%"))["market_edge_high"] is True
+    assert parse_signals(_pick("Home has +1.5% edge vs market (implied 48.5%, model 50.0%)"))["market_edge_low"] is True
+    assert parse_signals(_pick("Home has +3.0% edge vs market (implied 47.0%, model 50.0%)"))["market_edge_mid"] is True
+    assert parse_signals(_pick("Away has +5.2% edge vs market (implied 44.8%, model 50.0%)"))["market_edge_high"] is True
 
 
 def test_parse_signals_wind_strong():

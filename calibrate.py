@@ -58,7 +58,7 @@ def _parse_era(text: str, side: str) -> Optional[float]:
 
 def _parse_market_pct(text: str) -> Optional[float]:
     """Extract market edge percentage from edge_market text."""
-    m = re.search(r"Market edge:\s*([\d.]+)%", text or "", re.IGNORECASE)
+    m = re.search(r"has \+([\d.]+)% edge vs market", text or "", re.IGNORECASE)
     if m:
         return float(m.group(1))
     return None
