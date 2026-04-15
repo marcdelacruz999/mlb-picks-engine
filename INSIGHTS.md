@@ -246,7 +246,7 @@ Record any changes to `config.py WEIGHTS` here with reasoning.
 - **Home/away SP splits** — `fetch_pitcher_home_away_splits()` in data_mlb.py; away SP uses `away_era` split, home SP uses `home_era` split as `_blend()` base; `_pitcher_split_cache` per session
 - **Bullpen top reliever ERA** — `get_bullpen_top_relievers()` in database.py; top 3 relievers by IP (last 7d); IP-weighted ERA appended to bullpen edge
 - **Line movement tracking** — `opening_lines` table (INSERT OR IGNORE); Watch alert in `--refresh` when ML implied prob drops ≥5pp or total moves ≥0.5 against pick
-- **F5 picks** — `fetch_f5_odds()` (`baseball_mlb_h1` sport key); `_analyze_f5_pick()` fires when |pitching_score| ≥ 0.20; `pick_type = "f5_ml"`; graded via innings 1-5 linescore; Discord shows "F5 ML (First 5 Innings)"
+- **F5 picks** — `fetch_f5_odds()` (`baseball_mlb_h1` sport key); `_analyze_f5_pick()` fires when |pitching_score| ≥ 0.20 AND own team bullpen ≤ -0.10 (pen too weak to trust full game); `pick_type = "f5_ml"`; graded via innings 1-5 linescore; Discord shows "F5 ML (First 5 Innings)"
 - **Half-Kelly sizing** — `kelly_stake()` in analysis.py; 0.25–2.0x stake shown in Discord as `**Stake:** Xx units`
 - **Opponent-adjusted rolling ERA** — `opponent_team_id` in `pitcher_game_logs`; `get_pitcher_rolling_stats_adjusted()` weights by `opponent_rpg / 4.3`
 
@@ -294,7 +294,7 @@ Items marked 🔲 are not yet scheduled.
 | 3 | **Lineup strength scoring** | ✅ Done 2026-04-11 | Batch MLB people API; session cache |
 | 4 | **Rolling stats pipeline** | ✅ Done 2026-04-12 | pitcher_game_logs + team_game_logs; blend <5/5-9/10-19/20+ games; pitching + offense + bullpen agents |
 | 5 | **Home/away SP splits** | ✅ Done 2026-04-12 | fetch_pitcher_home_away_splits(); away SP uses away_era split, home SP uses home_era split |
-| 6 | **F5 (First 5 Innings) picks** | ✅ Done 2026-04-12 | baseball_mlb_h1 sport key; fires when |pitching_score| ≥ 0.20; graded via linescore innings 1-5 |
+| 6 | **F5 (First 5 Innings) picks** | ✅ Done 2026-04-12 | baseball_mlb_h1 sport key; fires when |pitching_score| ≥ 0.20 AND own bullpen ≤ -0.10; graded via linescore innings 1-5 |
 | 7 | **Line movement tracking** | ✅ Done 2026-04-12 | opening_lines table; Watch alert on ≥5pp ML drop or ≥0.5 total move against pick |
 
 ### Tier 2 — Solid signal improvements

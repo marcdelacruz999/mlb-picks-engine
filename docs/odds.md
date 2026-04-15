@@ -33,7 +33,9 @@
 ## F5 Picks (First 5 Innings)
 
 - Sport key: `baseball_mlb_h1`
-- Trigger: `|pitching_score| ≥ 0.20`
+- Trigger: `|pitching_score| ≥ F5_PITCHING_THRESHOLD (0.20)` **AND** `own_bullpen_score ≤ F5_BULLPEN_THRESHOLD (-0.10)`
+  - SP has clear edge AND their own bullpen is weak (can't trust pen to hold the full game)
+  - own_bullpen_score = home pen score when picking home; negated score when picking away
 - Direction: pitching_score > 0 → F5 Home ML; < 0 → F5 Away ML
 - Confidence: score ≥ 0.40 → 9 | ≥ 0.30 → 8 | ≥ 0.20 → 7
 - Grading: `/game/{pk}/linescore` — sum innings 1–5 per team; home_f5 > away_f5 → home won; tie → push

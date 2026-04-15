@@ -27,7 +27,7 @@ Open-Meteo ────┘
               ├─ Save opening lines per game (INSERT OR IGNORE — first capture)
               ├─ Run 7-agent scoring on each game
               ├─ EV gate + confidence/edge filter
-              ├─ Evaluate F5 picks (fires when |pitching_score| ≥ 0.20)
+              ├─ Evaluate F5 picks (fires when |pitching_score| ≥ 0.20 AND own team bullpen weak ≤ -0.10)
               ├─ Assign Kelly stake (half-Kelly, 0.25–2.0x) per approved pick
               ├─ Send approved picks to Discord (max 5; ML + O/U + F5 eligible)
               └─ Log all 15 games to analysis_log
@@ -180,10 +180,11 @@ analysis_log ──► ALL 15 games logged regardless of pick threshold
 
 ## F5 Picks (First 5 Innings)
 
-F5 picks isolate starting pitcher quality and eliminate bullpen variance — where the engine's strongest signal lives (pitching, +0.080 backtest lift).
+F5 picks fire when the SP has a clear edge but their own team's bullpen is weak — isolate SP quality for 5 innings rather than risk the pen giving back the lead in the full game.
 
 ```
-Trigger:  |pitching_score| ≥ 0.20  (strong SP matchup edge)
+Trigger:  |pitching_score| ≥ 0.20  (strong SP edge)
+          AND own_bullpen_score ≤ -0.10  (own pen is weak — can't hold full game)
 Odds:     The Odds API baseball_mlb_h1 sport key (separate fetch)
 Pick dir: pitching_score > 0 → F5 Home ML
           pitching_score < 0 → F5 Away ML
