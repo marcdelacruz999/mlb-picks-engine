@@ -1577,26 +1577,35 @@ def main():
         print(f"  Dispatching to Claude Code CLI...")
         impl = apply_via_claude(improvement["task"])
         if impl.get("success"):
-            tests_passed, test_output = run_tests()
-            if tests_passed:
-                git_commit(f"feat: optimizer: {improvement['name']}")
-                diff = git_diff_stat()
-                mark_complete(improvement["id"], improvement["name"], improvement["description"])
-                result = {
-                    "success": True,
-                    "diff_stat": impl.get("diff_stat", diff),
-                    "tests_passed": True,
-                }
-                print(f"  ✅ Claude implementation succeeded.")
+            # Guard: verify Claude actually changed something
+            changed_files = subprocess.run(
+                ["git", "diff", "--name-only", "HEAD"],
+                cwd=str(PROJECT_ROOT), capture_output=True, text=True
+            ).stdout.strip()
+            if not changed_files:
+                result = {"skipped": True, "reason": "Claude ran but made no file changes"}
+                print(f"  ⚠️  Claude returned success but changed nothing — skipping.")
             else:
-                # Tests failed — revert Claude's changes
-                git_revert()
-                result = {
-                    "success": False,
-                    "error": "Tests failed after Claude implementation — reverted",
-                    "test_output": test_output,
-                }
-                print(f"  ❌ Tests failed — reverted Claude's changes.")
+                tests_passed, test_output = run_tests()
+                if tests_passed:
+                    git_commit(f"feat: optimizer: {improvement['name']}")
+                    diff = git_diff_stat()
+                    mark_complete(improvement["id"], improvement["name"], improvement["description"])
+                    result = {
+                        "success": True,
+                        "diff_stat": impl.get("diff_stat", diff),
+                        "tests_passed": True,
+                    }
+                    print(f"  ✅ Claude implementation succeeded.")
+                else:
+                    # Tests failed — revert Claude's changes
+                    git_revert()
+                    result = {
+                        "success": False,
+                        "error": "Tests failed after Claude implementation — reverted",
+                        "test_output": test_output,
+                    }
+                    print(f"  ❌ Tests failed — reverted Claude's changes.")
         else:
             result = {"success": False, "error": impl.get("error", "Unknown error")}
             print(f"  ❌ Claude implementation failed: {impl.get('error')}")
