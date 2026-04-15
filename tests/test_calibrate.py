@@ -259,3 +259,49 @@ def test_suggest_weights_all_agents_nudged_proportional_scaling():
     # Old buggy code made offense drop from 0.23 to 0.13 (-0.10). This should be fixed.
     for agent in ("pitching", "offense", "bullpen", "advanced", "weather", "market"):
         assert result[agent] > 0.06, f"{agent} dropped below 0.06 (catastrophic decrease)"
+
+
+def test_build_embed_structure():
+    from calibrate import build_embed
+    analysis = {
+        "baseline_win_rate": 0.75,
+        "pick_count": 12,
+        "ml_record": (9, 3),
+        "ou_record": (0, 0),
+        "signal_table": {
+            "offense_home_edge": {"n": 8, "wins": 7, "losses": 1,
+                                   "win_rate": 0.875, "delta": 0.125},
+            "rust_weak_pen_home": {"n": 2, "wins": 0, "losses": 2,
+                                    "win_rate": 0.0, "delta": -0.75},
+        },
+    }
+    current_weights = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
+                       "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    suggested_weights = {"pitching": 0.22, "offense": 0.25, "bullpen": 0.20,
+                          "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.08}
+    embed = build_embed(analysis, current_weights, suggested_weights, week_label="Apr 14")
+
+    assert "embeds" in embed
+    e = embed["embeds"][0]
+    assert "Weekly Calibration" in e["title"]
+    assert "9W-3L" in e["description"]
+    assert "75.0%" in e["description"]
+    field_names = [f["name"] for f in e.get("fields", [])]
+    assert any("SIGNAL" in n.upper() for n in field_names)
+    assert any("WEIGHT" in n.upper() for n in field_names)
+
+
+def test_build_embed_no_changes_message():
+    from calibrate import build_embed
+    analysis = {
+        "baseline_win_rate": 0.70,
+        "pick_count": 5,
+        "ml_record": (3, 2),
+        "ou_record": (0, 0),
+        "signal_table": {},
+    }
+    weights = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
+               "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    embed = build_embed(analysis, weights, weights, week_label="Apr 14")
+    desc = embed["embeds"][0]["description"]
+    assert "calibrated" in desc.lower() or "no changes" in desc.lower()

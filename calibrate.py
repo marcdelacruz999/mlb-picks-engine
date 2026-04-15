@@ -295,3 +295,108 @@ def suggest_weights(current: dict, signal_table: dict,
 
     return new_weights
 
+
+def _signal_label(sig: str) -> str:
+    """Return a human-readable label for a signal key."""
+    labels = {
+        "sp_home_advantage":   "Home SP advantage",
+        "sp_away_advantage":   "Away SP advantage",
+        "sp_home_layoff":      "Home SP layoff",
+        "sp_away_layoff":      "Away SP layoff",
+        "offense_home_edge":   "Home offense edge",
+        "offense_away_edge":   "Away offense edge",
+        "bullpen_home_stronger": "Home bullpen stronger",
+        "bullpen_away_stronger": "Away bullpen stronger",
+        "bullpen_home_era_bad":  "Home bullpen ERA >5.0",
+        "bullpen_away_era_bad":  "Away bullpen ERA >5.0",
+        "advanced_barrel":     "Barrel rate edge",
+        "advanced_hardhit":    "Hard-hit rate edge",
+        "advanced_xwoba":      "xwOBA edge",
+        "market_edge_low":     "Market edge <2%",
+        "market_edge_mid":     "Market edge 2-4%",
+        "market_edge_high":    "Market edge >4%",
+        "lineup_confirmed":    "Lineup confirmed",
+        "rain_flag":           "Rain flag",
+        "wind_strong":         "Wind >12 mph",
+        "rust_weak_pen_home":  "Rust + weak pen (home)",
+        "rust_weak_pen_away":  "Rust + weak pen (away)",
+    }
+    return labels.get(sig, sig)
+
+
+def build_embed(analysis: dict, current_weights: dict,
+                suggested_weights: dict, week_label: str) -> dict:
+    """Build a Discord webhook payload with the calibration report embed."""
+    bl = analysis["baseline_win_rate"]
+    n  = analysis["pick_count"]
+    ml_w, ml_l = analysis["ml_record"]
+    ou_w, ou_l = analysis["ou_record"]
+    st = analysis["signal_table"]
+
+    ou_str = f"O/U: {ou_w}W-{ou_l}L" if (ou_w + ou_l) > 0 else "O/U: 0 graded"
+    desc_line = (
+        f"Record: {ml_w}W-{ml_l}L ({bl*100:.1f}%) | "
+        f"{n} picks | ML: {ml_w}W-{ml_l}L | {ou_str}"
+    )
+
+    # Signal breakdown field
+    if st:
+        sig_lines = []
+        for sig, row in sorted(st.items(), key=lambda x: x[1]["delta"], reverse=True):
+            icon = "✅" if row["delta"] >= 0.05 else ("⚠️" if row["delta"] <= -0.10 else "➡️")
+            flag = " ← flagged" if "rust_weak_pen" in sig else ""
+            sig_lines.append(
+                f"{icon} {_signal_label(sig):<22} "
+                f"{row['n']} picks  {row['wins']}W-{row['losses']}L  "
+                f"{row['win_rate']*100:.1f}%  ({row['delta']:+.1%}){flag}"
+            )
+        signal_value = "```\n" + "\n".join(sig_lines) + "\n```"
+    else:
+        signal_value = "_No signals with N ≥ 3 picks this week._"
+
+    # Weight suggestions field
+    weights_changed = current_weights != suggested_weights
+    if weights_changed:
+        wt_lines = []
+        for agent in current_weights:
+            cur = current_weights[agent]
+            sug = suggested_weights[agent]
+            diff = sug - cur
+            if abs(diff) >= 0.01:
+                wt_lines.append(f"{agent:<10} {cur:.2f} → {sug:.2f}  ({diff:+.2f})")
+            else:
+                wt_lines.append(f"{agent:<10} {cur:.2f}   (hold)")
+        wt_lines.append("\nRun: python3 calibrate.py --apply to apply")
+        weight_value = "```\n" + "\n".join(wt_lines) + "\n```"
+    else:
+        weight_value = "_Weights look calibrated — no changes recommended._"
+
+    sep = "━" * 32
+    if n < 10:
+        desc = f"{desc_line}\n\nNot enough graded picks this week ({n}) — report only, no changes suggested."
+    elif not weights_changed:
+        desc = f"{desc_line}\n\nWeights look calibrated — no changes recommended."
+    else:
+        desc = desc_line
+
+    embed = {
+        "title": f"📊 Weekly Calibration Report — Week of {week_label}",
+        "description": f"{sep}\n{desc}",
+        "color": 0x2ECC71 if bl >= 0.60 else 0xE74C3C,
+        "fields": [
+            {"name": "SIGNAL BREAKDOWN", "value": signal_value, "inline": False},
+            {"name": "SUGGESTED WEIGHTS", "value": weight_value, "inline": False},
+        ],
+        "footer": {"text": sep},
+    }
+
+    return {"embeds": [embed]}
+
+
+def post_to_discord(payload: dict) -> bool:
+    """POST embed payload to Discord webhook. Returns True on success."""
+    import requests
+    url = config.DISCORD_WEBHOOK_URL
+    resp = requests.post(url, json=payload, timeout=10)
+    return resp.status_code in (200, 204)
+
