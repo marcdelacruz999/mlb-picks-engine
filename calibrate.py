@@ -480,3 +480,72 @@ def apply_weights(picks: list, analysis: dict, suggested_weights: dict,
 
     return {"applied": True, "reason": summary}
 
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Weekly signal calibration report")
+    parser.add_argument("--apply", action="store_true",
+                        help="Apply suggested weights to config.py and commit")
+    parser.add_argument("--days", type=int, default=7,
+                        help="Lookback window in days (default: 7)")
+    parser.add_argument("--test", action="store_true",
+                        help="Dry run — print report to stdout, no Discord send")
+    args = parser.parse_args(argv)
+
+    conn = _open_db()
+    picks = fetch_graded_picks(conn, days=args.days)
+    conn.close()
+
+    analysis = analyze_signals(picks)
+    current_weights = dict(config.WEIGHTS)
+    suggested_weights = suggest_weights(
+        current_weights, analysis["signal_table"],
+        analysis["baseline_win_rate"], analysis["pick_count"]
+    )
+
+    week_label = datetime.now().strftime("%b %-d")
+    payload = build_embed(analysis, current_weights, suggested_weights, week_label)
+
+    if args.test:
+        e = payload["embeds"][0]
+        print(e["title"])
+        print(e["description"])
+        for field in e.get("fields", []):
+            print(f"\n{field['name']}")
+            print(field["value"])
+        return
+
+    # Post to Discord
+    ok = post_to_discord(payload)
+    if not ok:
+        print("WARNING: Discord post failed")
+
+    # Write log entry
+    apply_result = {"applied": False, "reason": "report-only run"}
+    if args.apply:
+        apply_result = apply_weights(
+            picks=picks,
+            analysis=analysis,
+            suggested_weights=suggested_weights,
+            current_weights=current_weights,
+        )
+
+    log_entry = {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "window_days": args.days,
+        "pick_count": analysis["pick_count"],
+        "win_rate": analysis["baseline_win_rate"],
+        "signal_table": analysis["signal_table"],
+        "weights_before": current_weights,
+        "weights_after": suggested_weights if apply_result["applied"] else current_weights,
+        "applied": apply_result["applied"],
+    }
+    write_calibration_log(log_entry)
+
+    status = "applied" if apply_result["applied"] else "report only"
+    print(f"Calibration complete ({status}) — {analysis['pick_count']} picks, "
+          f"{analysis['baseline_win_rate']*100:.1f}% win rate")
+
+
+if __name__ == "__main__":
+    main()
+

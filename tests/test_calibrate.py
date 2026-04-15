@@ -382,3 +382,35 @@ def test_apply_weights_requires_min_picks():
     )
     assert result["applied"] is False
     assert "not enough" in result["reason"].lower()
+
+
+def test_main_test_mode_no_discord(monkeypatch):
+    """--test mode runs full pipeline and prints to stdout, no Discord call."""
+    import io, sys
+    from calibrate import main
+
+    conn = _make_db([
+        {"status": "won", "discord_sent": 1, "created_at": "2026-04-14 08:00:00",
+         "edge_pitching": "Home SP has clear pitching advantage over Away SP.",
+         "pick_type": "moneyline"},
+        {"status": "won", "discord_sent": 1, "created_at": "2026-04-14 09:00:00",
+         "edge_offense": "Home lineup has offensive advantage over Away.",
+         "pick_type": "moneyline"},
+        {"status": "lost", "discord_sent": 1, "created_at": "2026-04-14 10:00:00",
+         "edge_pitching": "Home SP extended layoff (10 days rest).",
+         "edge_bullpen": "Home top pen (7d): 2 appearances, 6.10 ERA.",
+         "pick_type": "moneyline"},
+    ])
+    monkeypatch.setattr("calibrate._open_db", lambda: conn)
+
+    posted = []
+    monkeypatch.setattr("calibrate.post_to_discord", lambda p: posted.append(p) or True)
+
+    captured = io.StringIO()
+    monkeypatch.setattr("sys.stdout", captured)
+
+    main(["--test"])
+
+    output = captured.getvalue()
+    assert "Calibration" in output or "Record" in output or "ML:" in output
+    assert len(posted) == 0  # --test should NOT post to Discord
