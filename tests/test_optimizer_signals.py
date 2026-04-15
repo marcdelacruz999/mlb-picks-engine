@@ -132,10 +132,14 @@ def test_no_garbage_from_text_extraction(monkeypatch):
     conn.close()
     os.unlink(db_name)
 
+    assert abs(result["pitching"]["live_differential"] - 0.20) < 0.001, (
+        f"Expected pitching live_differential ~0.20, got {result['pitching']['live_differential']}"
+    )
+    # Also verify no agent has a suspiciously large value
     for agent, data in result.items():
         live = data["live_differential"]
-        assert abs(live) < 2.0, (
-            f"Agent '{agent}' live_differential={live:.3f} looks like garbage text extraction"
+        assert abs(live) <= 0.5, (
+            f"Agent '{agent}' live_differential={live:.3f} out of expected range for this test data"
         )
 
 

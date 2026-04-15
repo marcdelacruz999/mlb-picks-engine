@@ -509,6 +509,7 @@ def analyze_agent_signals(days=30):
         JOIN analysis_log al ON g.mlb_game_id = al.mlb_game_id
         WHERE g.game_date >= ? AND p.discord_sent = 1
           AND p.status IN ('won', 'lost')
+          AND p.pick_type IN ('moneyline', 'f5_ml')
     """, (since,)).fetchall()
     conn.close()
 
