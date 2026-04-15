@@ -344,8 +344,8 @@ def test_update_config_weights_writes_correctly():
     from calibrate import _update_config_weights
 
     config_content = '''WEIGHTS = {
-    "pitching":    0.22,
-    "offense":     0.23,
+    "pitching":    0.22,   # was 0.25 — trimmed: rust-risk layoff SP pattern
+    "offense":     0.23,   # was 0.20 — bumped: confirmed lineup edge
     "bullpen":     0.20,
     "advanced":    0.13,
     "momentum":    0.07,
@@ -366,6 +366,9 @@ def test_update_config_weights_writes_correctly():
         assert "0.25" in result  # offense changed
         # Verify original 0.23 is gone
         assert '"offense":     0.23' not in result
+        # Inline comments must be preserved
+        assert "# was 0.25 — trimmed: rust-risk layoff SP pattern" in result
+        assert "# was 0.20 — bumped: confirmed lineup edge" in result
     finally:
         os.unlink(tmp_path)
 

@@ -428,13 +428,15 @@ def _update_config_weights(new_weights: dict, config_path: str = _CONFIG_PATH) -
     for line in lines:
         replaced = False
         for agent, value in new_weights.items():
-            # Match pattern: "agent": <spaces> <number>, optionally followed by # comment
-            pattern = rf'(\s*"{agent}":\s+)[\d.]+(\s*(?:#.*)?)'
+            # Match pattern: "agent": <spaces> <number>, (optional trailing comment)
+            # group(1) = indent + key + colon + spaces
+            # group(2) = comma + everything after (whitespace, inline comment)
+            pattern = rf'(\s*"{agent}":\s+)[\d.]+(,.*)'
             m = re.match(pattern, line)
             if m:
-                # Preserve indentation and any comment
+                # Preserve indentation and the trailing comma + any inline comment
                 formatted_value = f"{value:.2f}"
-                updated.append(f'{m.group(1)}{formatted_value},{m.group(2)}\n')
+                updated.append(f'{m.group(1)}{formatted_value}{m.group(2)}\n')
                 replaced = True
                 break
         if not replaced:
