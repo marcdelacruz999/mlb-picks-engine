@@ -305,3 +305,34 @@ def test_build_embed_no_changes_message():
     embed = build_embed(analysis, weights, weights, week_label="Apr 14")
     desc = embed["embeds"][0]["description"]
     assert "calibrated" in desc.lower() or "no changes" in desc.lower()
+
+
+def test_write_calibration_log_appends():
+    import tempfile, os, json
+    from calibrate import write_calibration_log
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+        log_path = f.name
+
+    try:
+        entry = {
+            "date": "2026-04-21",
+            "window_days": 7,
+            "pick_count": 12,
+            "win_rate": 0.75,
+            "signal_table": {"offense_home_edge": {"n": 8, "wins": 7, "losses": 1,
+                                                    "win_rate": 0.875, "delta": 0.125}},
+            "weights_before": {"pitching": 0.22, "offense": 0.23},
+            "weights_after":  {"pitching": 0.22, "offense": 0.25},
+            "applied": False,
+        }
+        write_calibration_log(entry, log_path=log_path)
+        write_calibration_log(entry, log_path=log_path)
+
+        lines = open(log_path).readlines()
+        assert len(lines) == 2
+        parsed = json.loads(lines[0])
+        assert parsed["win_rate"] == 0.75
+        assert parsed["applied"] is False
+    finally:
+        os.unlink(log_path)

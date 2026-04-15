@@ -13,6 +13,7 @@ import re
 import json
 import argparse
 import subprocess
+import os
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -399,4 +400,13 @@ def post_to_discord(payload: dict) -> bool:
     url = config.DISCORD_WEBHOOK_URL
     resp = requests.post(url, json=payload, timeout=10)
     return resp.status_code in (200, 204)
+
+
+_DEFAULT_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration_log.jsonl")
+
+
+def write_calibration_log(entry: dict, log_path: str = _DEFAULT_LOG_PATH) -> None:
+    """Append a calibration run entry to the JSONL log."""
+    with open(log_path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
 
