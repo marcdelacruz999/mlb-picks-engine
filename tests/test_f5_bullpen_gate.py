@@ -47,3 +47,17 @@ def test_f5_edge_string_includes_bullpen_context():
     edge = result["edge"]
     assert "pen" in edge.lower() or "bullpen" in edge.lower()
     assert "0.18" in edge
+
+
+def test_f5_blocked_by_gate1_regardless_of_bullpen():
+    """Gate 1: weak pitching alone blocks F5 even if bullpen is terrible."""
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=0.15, opponent_bullpen_score=-0.20)
+    assert result is None
+
+
+def test_f5_away_pick_direction():
+    """Away pick: negative pitching_score should produce f5_away for the away team."""
+    result = _analyze_f5_pick(GAME, F5_ODDS, pitching_score=-0.25, opponent_bullpen_score=-0.15)
+    assert result is not None
+    assert result["pick"] == "f5_away"
+    assert result["pick_team"] == "Cardinals"

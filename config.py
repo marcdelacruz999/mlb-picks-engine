@@ -37,6 +37,8 @@ MIN_CONFIDENCE = 7          # 1-10 scale; only picks ≥ this are approved
 MIN_CONFIDENCE_OU = 9       # O/U requires higher bar — gap formula only, needs ≥2.0 run gap to qualify
 MIN_EDGE_SCORE = 0.12       # minimum weighted edge to approve a pick
 MIN_EV = -0.02              # allow slightly negative EV for high-confidence plays
+F5_PITCHING_THRESHOLD = 0.20   # min |pitching_score| for F5 picks
+F5_BULLPEN_THRESHOLD = -0.10   # max opponent_bullpen_score for F5 picks (must be <= this)
 OU_CONVICTION_GAP = 1.5     # projected total must differ from line by ≥ this many runs to send O/U
 
 # Batter data pipeline thresholds

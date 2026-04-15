@@ -5,7 +5,7 @@ Implements the weighted decision model with all 7 agents.
 Produces confidence scores, win probabilities, and pick recommendations.
 """
 
-from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP, F5_PITCHING_THRESHOLD, F5_BULLPEN_THRESHOLD
 from data_odds import implied_probability, find_value
 from data_mlb import fetch_lineup_batting
 import database as _analysis_db
@@ -920,7 +920,12 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     # For an away pick (pitching < 0), opponent is home — home pen is weak when bullpen score < 0
     #   → use as-is
     _bp = bullpen["score"]
-    opponent_bullpen_score = -_bp if pitching["score"] > 0 else _bp
+    if pitching["score"] > 0:
+        opponent_bullpen_score = -_bp   # home pick — away pen is the opponent
+    elif pitching["score"] < 0:
+        opponent_bullpen_score = _bp    # away pick — home pen is the opponent
+    else:
+        opponent_bullpen_score = 0.0    # no edge — Gate 1 will reject anyway
     f5_pick = _analyze_f5_pick(game, f5_odds, pitching["score"], opponent_bullpen_score)
 
     # ── Lineup status ──
@@ -1199,7 +1204,7 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
 
 
 def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float,
-                     opponent_bullpen_score: float = 0.0) -> "dict | None":
+                     opponent_bullpen_score: float = 0.0) -> "dict | None":  # default blocks gate (> -0.10)
     """
     Determine if there's an F5 (First 5 Innings) pick.
     Fires when:
@@ -1223,11 +1228,11 @@ def _analyze_f5_pick(game: dict, f5_odds: dict, pitching_score: float,
         return None
 
     # Gate 1: SP must have a clear edge
-    if abs(pitching_score) < 0.20:
+    if abs(pitching_score) < F5_PITCHING_THRESHOLD:
         return None
 
     # Gate 2: Opponent bullpen must be meaningfully weak
-    if opponent_bullpen_score > -0.10:
+    if opponent_bullpen_score > F5_BULLPEN_THRESHOLD:
         return None
 
     if pitching_score > 0:
