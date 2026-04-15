@@ -160,3 +160,11 @@ Each entry uses an HTML comment marker for reliable ID matching:
 **Date:** 2026-04-13
 **Commit:** fix: reject implausible O/U odds (<15 abs value) in EV calc; add O/U edge gate
 **Summary:** The Odds API occasionally returns juice like -14 (data error). _calculate_ev() now returns None for abs(odds)<15, treating it as unavailable odds → pick blocked by EV gate. Prevents EV scores like +4.7 on effectively even-money bets.
+
+---
+
+<!-- id: batter_game_logs -->
+## Batter Game Logs & Hot/Cold Streak Signal
+**Date:** 2026-04-15
+**Commit:** feat: add batter game logs and hot/cold streak signal to offense agent
+**Summary:** batter_game_logs table added to database.py with collect_batter_boxscores(), get_team_batter_hot_cold(), and per-team K-rate/rolling OPS helpers. Hot/cold streak signal integrated into score_offense() in analysis.py — bonus/penalty of ±0.04 when hot_count - cold_count >= 2. collect_batter_boxscores() called in engine.py --results run. 5 tests in tests/test_batter_logs.py covering table init, API parsing, hot/cold logic, and insufficient-data fallback.
