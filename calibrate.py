@@ -268,8 +268,8 @@ def suggest_weights(current: dict, signal_table: dict,
         adjustments[agent] = max(-MAX_NUDGE, min(MAX_NUDGE, adjustments[agent]))
 
     total_adj = sum(abs(v) for v in adjustments.values())
-    if total_adj == 0:
-        return current  # no changes at all
+    if total_adj < MIN_TOTAL_ADJUSTMENT:
+        return current  # below noise threshold
 
     # Apply adjustments
     new_weights = {k: round(current[k] + adjustments[k], 4) for k in current}

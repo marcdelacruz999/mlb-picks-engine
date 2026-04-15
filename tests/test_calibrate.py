@@ -197,13 +197,19 @@ def test_suggest_weights_nudge_up():
     from calibrate import suggest_weights
     current = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
                "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
-    # offense signal winning at 90% vs 60% baseline — should suggest +0.02 to offense
+    # Two signals: offense winning big (+0.02 nudge), bullpen winning big (+0.02 nudge)
+    # total_adj = 0.04 >= MIN_TOTAL_ADJUSTMENT (0.03), so changes should apply
     signal_table = {
         "offense_home_edge": {"n": 6, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.30},
+        "bullpen_home_stronger": {"n": 6, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.30},
     }
     baseline = 0.60
     suggestions = suggest_weights(current, signal_table, baseline, n_picks=12)
-    assert suggestions["offense"] == round(0.23 + 0.02, 4)
+    # After normalization, both offense and bullpen should be higher than their current values
+    assert suggestions["offense"] > current["offense"]
+    assert suggestions["bullpen"] > current["bullpen"]
+    # Total should sum to 1.0
+    assert round(sum(suggestions.values()), 4) == 1.0
 
 
 def test_suggest_weights_no_change_when_low_n():
@@ -223,8 +229,10 @@ def test_suggest_weights_normalizes_to_1():
     from calibrate import suggest_weights
     current = {"pitching": 0.22, "offense": 0.23, "bullpen": 0.20,
                "advanced": 0.13, "momentum": 0.07, "weather": 0.05, "market": 0.10}
+    # Two signals to cross MIN_TOTAL_ADJUSTMENT threshold
     signal_table = {
         "offense_home_edge": {"n": 6, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.30},
+        "bullpen_home_stronger": {"n": 6, "wins": 9, "losses": 1, "win_rate": 0.90, "delta": 0.30},
     }
     suggestions = suggest_weights(current, signal_table, 0.60, n_picks=12)
     total = round(sum(suggestions.values()), 4)
