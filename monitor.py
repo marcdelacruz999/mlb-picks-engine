@@ -6,7 +6,7 @@ import requests
 import database
 import data_mlb as data_mlb_module
 from datetime import date
-from database import get_db_connection, get_connection, get_today_picks, get_today_analysis_log, pitcher_already_alerted, save_scratch_alert, lineup_alert_already_sent, save_lineup_alert, get_batter_rolling_ops
+from database import get_connection, get_today_picks, get_today_analysis_log, pitcher_already_alerted, save_scratch_alert, lineup_alert_already_sent, save_lineup_alert, get_batter_rolling_ops
 from config import DISCORD_WEBHOOK_URL, LINEUP_OPS_DROP_THRESHOLD, LINEUP_MIN_PLAYERS_WITH_DATA, MIN_BATTER_GAMES
 from data_mlb import get_current_lineups, fetch_lineup_batting, fetch_team_batting
 
