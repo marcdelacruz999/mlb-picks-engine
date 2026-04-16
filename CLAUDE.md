@@ -100,7 +100,7 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **database.py is module-level functions** — NOT a class. Uses `get_connection()` per call. `import database as db` in data_mlb.py. See `docs/database.md` for full table/function reference.
 
-**New DB tests pattern** — use `monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))`, then call `database.init_db()` and `database.get_connection()` directly. See `tests/test_database.py`.
+**New DB tests pattern** — use `monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))`, then call `database.init_db()` and `database.get_connection()` directly. `get_connection()` reads `DB_PATH` (not `DATABASE_PATH`). See `tests/test_database.py`.
 
 **MLB /schedule linescore endpoint** — does NOT return `abbreviation` field, only `team_id`. Use `db.get_team_abbr_by_mlb_id(team_id)` to look up abbreviations from the `teams` table.
 

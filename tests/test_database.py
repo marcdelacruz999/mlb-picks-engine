@@ -125,7 +125,7 @@ def test_backfill_game_totals_abbr_handles_null_abbr(monkeypatch, tmp_path):
 @pytest.fixture
 def db_path(tmp_path, monkeypatch):
     path = str(tmp_path / "test.db")
-    monkeypatch.setattr(database, "DATABASE_PATH", path)
+    monkeypatch.setattr(database, "DB_PATH", path)
     database.init_db()
     return path
 
