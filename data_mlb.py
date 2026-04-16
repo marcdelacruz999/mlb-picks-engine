@@ -172,9 +172,13 @@ def _parse_ip(ip_str) -> float:
 def fetch_all_teams() -> list:
     """Fetch all MLB teams and upsert into DB."""
     url = f"{MLB_BASE}/teams?sportId=1&season={SEASON_YEAR}"
-    resp = requests.get(url, timeout=15)
-    resp.raise_for_status()
-    teams = resp.json().get("teams", [])
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        teams = resp.json().get("teams", [])
+    except Exception as e:
+        print(f"[DATA] Error fetching teams: {e}")
+        return []
 
     results = []
     for t in teams:
@@ -209,9 +213,13 @@ def fetch_todays_games(target_date: str = None) -> list:
         f"{MLB_BASE}/schedule?sportId=1&date={target_date}"
         f"&hydrate=probablePitcher(note),team,linescore,venue,officials,lineups"
     )
-    resp = requests.get(url, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
+    try:
+        resp = requests.get(url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"[DATA] Error fetching games for {target_date}: {e}")
+        return []
 
     games = []
     for d in data.get("dates", []):

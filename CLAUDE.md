@@ -38,10 +38,10 @@ python3 engine.py --report DATE     # Re-send nightly report for DATE (YYYY-MM-D
 ## Pick Filter
 
 - Min confidence ML: **7/10** (`MIN_CONFIDENCE` in config.py)
-- Min confidence O/U: **9/10** (`MIN_CONFIDENCE_OU`) — gap formula only, needs ≥2.0 run gap
+- Min confidence O/U: **9/10** (`MIN_CONFIDENCE_OU`) — gap formula only, needs ≥1.5 run gap
 - Min edge score: **0.12** (`MIN_EDGE_SCORE`)
 - Min EV: **−0.02** (`MIN_EV`)
-- Max picks/day: **5** (`MAX_PICKS_PER_DAY`)
+- Max picks/day: **20** (`MAX_PICKS_PER_DAY`) — ML and O/U tracked independently
 - Pick types: `moneyline` | `over` | `under` | `f5_ml`
 - SP TBD cap: one SP unknown → max 3/10 (ML + O/U); both unknown → max 1/10
 - If nothing qualifies → PASS, nothing sent

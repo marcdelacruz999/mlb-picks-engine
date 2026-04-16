@@ -650,11 +650,12 @@ def run_results():
         if pick["pick_type"] == "moneyline":
             home_won = home_score > away_score
             away_won = away_score > home_score
+            is_tie = home_score == away_score
 
             if pick["pick_team"] == result.get("home_team_name"):
-                status = "won" if home_won else "lost"
+                status = "won" if home_won else ("push" if is_tie else "lost")
             elif pick["pick_team"] == result.get("away_team_name"):
-                status = "won" if away_won else "lost"
+                status = "won" if away_won else ("push" if is_tie else "lost")
             else:
                 status = "push"
 

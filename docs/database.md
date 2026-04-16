@@ -10,11 +10,20 @@ SQLite at `mlb_picks.db`. Initialized via `database.init_db()` on every run.
 | `analysis_log` | All 15 games per day; 7 agent score columns; UNIQUE(game_date, mlb_game_id) + INSERT OR REPLACE |
 | `pitcher_game_logs` | Per-start: IP, ER, K, BB, H, HR, opponent_team_id |
 | `team_game_logs` | Per-game: R, H, HR, K, BB, AB per team, is_away flag |
+| `batter_game_logs` | Per-game per batter: OPS, K, BB, AB, H (hot/cold streak signal) |
 | `opening_lines` | First captured odds per game per day (INSERT OR IGNORE — opening preserved) |
 | `scratch_alerts` | Pitcher scratch dedup: UNIQUE(game_date, mlb_game_id, side) |
+| `lineup_alerts` | Lineup OPS weakness dedup: UNIQUE(mlb_game_id, game_date) |
 | `games` | Game records with final scores |
 | `teams` | 30 teams: mlb_id, abbreviation, division, league |
+| `players` | Player records: mlb_id, name, position, team_id |
+| `pitcher_stats` | Season pitcher stats snapshot (ERA, WHIP, K9, BB9, K/BB) |
+| `team_batting` | Season team batting snapshot (AVG, OBP, SLG, OPS, runs/game) |
+| `bullpen_stats` | Season bullpen snapshot (ERA, WHIP, saves, blown saves) |
+| `odds` | Raw odds captures per game per run |
 | `daily_results` | W/L/P/ROI per day |
+| `daily_board` | Discord ML picks board message ID tracking (for edits) |
+| `daily_ou_board` | Discord O/U picks board message ID tracking (for edits) |
 
 ### picks columns
 `id, game_id, pick_type, confidence, win_probability, edge_score, ev_score, kelly_fraction,
