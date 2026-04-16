@@ -732,7 +732,7 @@ def run_results():
     conn.close()
 
     # ── Grade analysis_log entries ──
-    log_entries = db.get_today_analysis_log()
+    log_entries = db.get_analysis_log_for_date(grading_date)
     log_correct = 0
     log_incorrect = 0
     log_ou_correct = 0
@@ -801,6 +801,9 @@ def run_results():
 
     if total == 0 and pushes == 0:
         print("\nNo picks were newly graded (all already resolved or no final scores matched).")
+        if not log_entries:
+            print("[RESULTS] No analysis log entries for today — skipping nightly report.")
+            return
         # Still send the nightly report using already-graded data from the DB
         _sent_picks_by_game: dict = {}
         for p in picks:
