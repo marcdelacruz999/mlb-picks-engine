@@ -306,6 +306,201 @@ def _format_results_message(results: dict) -> str:
     return msg
 
 
+def _format_nightly_report(
+    results: dict,
+    log_entries: list,
+    sent_picks_by_game: dict,
+    mlb_to_local: dict,
+) -> str:
+    """
+    Format the compact nightly report with three sections:
+    1. Confidence Picks (sent picks with result)
+    2. ML Board (all games)
+    3. O/U Board (only games with O/U pick)
+
+    Args:
+        results: grading results dict from run_results()
+        log_entries: list of analysis_log dicts (with ml_status, ou_status, scores)
+        sent_picks_by_game: {local_game_id: [pick_dict, ...]}
+        mlb_to_local: {mlb_game_id: local_game_id}
+    """
+    today = date.today().strftime("%B %d, %Y")
+    wins = results.get("wins", 0)
+    losses = results.get("losses", 0)
+    roi = results.get("roi", 0.0)
+    ml_correct = results.get("ml_correct", 0)
+    ml_incorrect = results.get("ml_incorrect", 0)
+    ou_correct = results.get("ou_correct", 0)
+    ou_incorrect = results.get("ou_incorrect", 0)
+
+    roi_str = f"+{roi}%" if roi > 0 else f"{roi}%"
+
+    lines = [f"⚾ **MLB NIGHTLY REPORT — {today}**", ""]
+
+    # ── Section 1: Confidence Picks ──────────────────────────
+    lines.append("🎯 **CONFIDENCE PICKS**  ━━━━━━━━━━━━━━━━━━━━")
+
+    sent_any = False
+    for entry in sorted(log_entries, key=lambda e: e.get("ml_confidence", 0), reverse=True):
+        mlb_game_id = entry.get("mlb_game_id")
+        local_id = mlb_to_local.get(mlb_game_id)
+        game_picks = sent_picks_by_game.get(local_id, [])
+        ml_picks = [p for p in game_picks if p["pick_type"] in ("moneyline", "f5_ml")]
+        if not ml_picks:
+            continue
+
+        pick = ml_picks[0]
+        away = entry.get("away_team", "?")
+        home = entry.get("home_team", "?")
+        away_short = away.split()[-1][:3].upper()
+        home_short = home.split()[-1][:3].upper()
+        pick_team = pick.get("pick_team", "?")
+        pick_short = pick_team.split()[-1]
+        conf = pick.get("confidence", "?")
+        win_prob = pick.get("win_probability", 0)
+        odds = pick.get("ml_odds", "")
+        odds_str = f" {odds:+d}" if isinstance(odds, int) else ""
+        away_sc = entry.get("actual_away_score", 0) or 0
+        home_sc = entry.get("actual_home_score", 0) or 0
+
+        # Score string: winner name first
+        if away_sc > home_sc:
+            score_str = f"{away_short} {away_sc}-{home_sc}"
+        else:
+            score_str = f"{home_short} {home_sc}-{away_sc}"
+
+        status = entry.get("ml_status", "pending")
+        if status == "correct":
+            result_emoji = "✅"
+            result_word = "WON"
+        elif status == "incorrect":
+            result_emoji = "❌"
+            result_word = "LOST"
+        else:
+            result_emoji = "➖"
+            result_word = "PUSH"
+
+        pick_type_label = "F5 ML" if pick.get("pick_type") == "f5_ml" else "ML"
+        lines.append(
+            f"{result_emoji} {away_short} @ {home_short}  →  "
+            f"{pick_short} {pick_type_label}{odds_str}  {int(win_prob)}% · {conf}/10  "
+            f"{score_str}  **{result_word}**"
+        )
+        sent_any = True
+
+    if not sent_any:
+        lines.append("📋 PASS — no picks met threshold today")
+
+    total_picks = wins + losses
+    if total_picks > 0:
+        lines.append(f"📊 **{wins}W-{losses}L · ROI {roi_str}**")
+    lines.append("")
+
+    # ── Section 2: ML Board ──────────────────────────────────
+    lines.append("📋 **ML BOARD**  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+    sorted_entries = sorted(log_entries, key=lambda e: e.get("ml_confidence", 0), reverse=True)
+    for entry in sorted_entries:
+        conf = entry.get("ml_confidence", 0)
+        away = entry.get("away_team", "?")
+        home = entry.get("home_team", "?")
+        away_short = away.split()[-1][:3].upper()
+        home_short = home.split()[-1][:3].upper()
+        pick_team = entry.get("ml_pick_team", "?")
+        pick_short = pick_team.split()[-1]
+
+        if conf >= 8:
+            tier = "🔥"
+        elif conf >= 7:
+            tier = "🎯"
+        elif conf >= 4:
+            tier = "➡️"
+        else:
+            tier = "⚠️"
+
+        away_sc = entry.get("actual_away_score", 0) or 0
+        home_sc = entry.get("actual_home_score", 0) or 0
+        if away_sc > home_sc:
+            score_str = f"{away_short} {away_sc}-{home_sc}"
+        else:
+            score_str = f"{home_short} {home_sc}-{away_sc}"
+
+        status = entry.get("ml_status", "pending")
+        if status == "correct":
+            result = "✅"
+        elif status == "incorrect":
+            result = "❌"
+        else:
+            result = "➖"
+
+        # Flag if a confidence pick was sent for this game
+        mlb_game_id = entry.get("mlb_game_id")
+        local_id = mlb_to_local.get(mlb_game_id)
+        game_picks = sent_picks_by_game.get(local_id, [])
+        sent_flag = " 🎯" if any(p["pick_type"] in ("moneyline", "f5_ml") for p in game_picks) else ""
+
+        lines.append(
+            f"{tier} {away_short} @ {home_short}  →  {pick_short} {conf}/10  "
+            f"{score_str}  {result}{sent_flag}"
+        )
+
+    ml_total = ml_correct + ml_incorrect
+    ml_pct = round(ml_correct / ml_total * 100, 1) if ml_total > 0 else 0
+    lines.append(f"📊 **{ml_correct}W-{ml_incorrect}L · {ml_pct}%**")
+    lines.append("")
+
+    # ── Section 3: O/U Board ─────────────────────────────────
+    ou_lines = []
+    for entry in sorted_entries:
+        ou_pick = entry.get("ou_pick")
+        ou_line_val = entry.get("ou_line")
+        if not ou_pick or not ou_line_val:
+            continue
+
+        away = entry.get("away_team", "?")
+        home = entry.get("home_team", "?")
+        away_short = away.split()[-1][:3].upper()
+        home_short = home.split()[-1][:3].upper()
+
+        direction_emoji = "🔼" if ou_pick == "over" else "🔽"
+        direction_label = "O" if ou_pick == "over" else "U"
+
+        away_sc = entry.get("actual_away_score", 0) or 0
+        home_sc = entry.get("actual_home_score", 0) or 0
+        total_sc = away_sc + home_sc
+
+        ou_status = entry.get("ou_status", "pending")
+        if ou_status == "correct":
+            marker = "✅"
+            result_char = "✓"
+        elif ou_status == "incorrect":
+            marker = "❌"
+            result_char = "✗"
+        else:
+            marker = "➖"
+            result_char = "push"
+
+        # Flag if a sent pick matches this O/U
+        mlb_game_id = entry.get("mlb_game_id")
+        local_id = mlb_to_local.get(mlb_game_id)
+        game_picks = sent_picks_by_game.get(local_id, [])
+        sent_flag = " 🎯" if any(p["pick_type"] in ("over", "under") for p in game_picks) else ""
+
+        ou_lines.append(
+            f"{marker} {away_short} @ {home_short}  →  "
+            f"{direction_emoji} {direction_label}{ou_line_val}  Total: {total_sc}  {result_char}{sent_flag}"
+        )
+
+    if ou_lines:
+        lines.append("🎰 **O/U BOARD**  ━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.extend(ou_lines)
+        ou_total = ou_correct + ou_incorrect
+        ou_pct = round(ou_correct / ou_total * 100, 1) if ou_total > 0 else 0
+        lines.append(f"📊 **{ou_correct}W-{ou_incorrect}L · {ou_pct}%**")
+
+    return "\n".join(lines)
+
+
 # ══════════════════════════════════════════════
 #  WEBHOOK PAYLOAD EXPORT (for debugging)
 # ══════════════════════════════════════════════
