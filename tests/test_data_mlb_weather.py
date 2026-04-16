@@ -28,7 +28,7 @@ FAKE_SCHEDULE_RESPONSE = {
 def test_collect_game_totals_stores_weather(tmp_path, monkeypatch):
     """collect_game_totals() stores weather when fetch_venue_weather succeeds."""
     import database
-    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "test.db"))
     database.init_db()
 
     mock_resp = MagicMock()
@@ -58,7 +58,7 @@ def test_collect_game_totals_stores_weather(tmp_path, monkeypatch):
 def test_collect_game_totals_weather_fetch_failure_stores_none(tmp_path, monkeypatch):
     """collect_game_totals() stores None for weather when fetch_venue_weather raises."""
     import database
-    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "test.db"))
     database.init_db()
 
     # Use a unique gamePk to avoid INSERT OR IGNORE collision with other tests
@@ -109,7 +109,7 @@ def test_collect_game_totals_weather_fetch_failure_stores_none(tmp_path, monkeyp
 def test_collect_game_totals_missing_venue_skips_weather(tmp_path, monkeypatch):
     """collect_game_totals() skips weather fetch when venue_id is absent."""
     import database
-    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "test.db"))
     database.init_db()
 
     # Schedule response with no venue field
@@ -159,7 +159,7 @@ def test_collect_game_totals_missing_venue_skips_weather(tmp_path, monkeypatch):
 def test_backfill_game_totals_weather_updates_null_rows(tmp_path, monkeypatch):
     """backfill_game_totals_weather() updates rows where temp_f IS NULL."""
     import database
-    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "test.db"))
     database.init_db()
 
     # Insert a game_totals row with NULL weather
@@ -197,7 +197,7 @@ def test_backfill_game_totals_weather_updates_null_rows(tmp_path, monkeypatch):
 def test_backfill_game_totals_weather_skips_populated_rows(tmp_path, monkeypatch):
     """backfill_game_totals_weather() skips rows that already have temp_f populated."""
     import database
-    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "test.db"))
     database.init_db()
 
     # Insert a row WITH weather already populated
@@ -225,7 +225,7 @@ def test_backfill_game_totals_weather_skips_populated_rows(tmp_path, monkeypatch
 def test_backfill_game_totals_weather_handles_api_failure(tmp_path, monkeypatch):
     """backfill_game_totals_weather() skips games where MLB API fails, returns 0."""
     import database
-    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setattr("database.DB_PATH", str(tmp_path / "test.db"))
     database.init_db()
 
     conn = database.get_connection()

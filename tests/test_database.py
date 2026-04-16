@@ -7,7 +7,7 @@ import database
 def db_conn(tmp_path, monkeypatch):
     """Patch DATABASE_PATH to a temp file, init DB, insert two known teams."""
     db_path = str(tmp_path / "test.db")
-    monkeypatch.setattr(database, "DATABASE_PATH", db_path)
+    monkeypatch.setattr(database, "DB_PATH", db_path)
     database.init_db()
     conn = database.get_connection()
     conn.execute(
@@ -40,7 +40,7 @@ def test_get_team_abbr_none_id_returns_empty(db_conn):
 def test_backfill_game_totals_abbr_populates_empty_rows(monkeypatch, tmp_path):
     """Rows with empty abbr strings get populated from teams table."""
     db_path = str(tmp_path / "test.db")
-    monkeypatch.setattr(database, "DATABASE_PATH", db_path)
+    monkeypatch.setattr(database, "DB_PATH", db_path)
     database.init_db()
 
     conn = database.get_connection()
@@ -69,7 +69,7 @@ def test_backfill_game_totals_abbr_populates_empty_rows(monkeypatch, tmp_path):
 def test_backfill_game_totals_abbr_skips_populated_rows(monkeypatch, tmp_path):
     """Rows already having abbreviations are not touched."""
     db_path = str(tmp_path / "test.db")
-    monkeypatch.setattr(database, "DATABASE_PATH", db_path)
+    monkeypatch.setattr(database, "DB_PATH", db_path)
     database.init_db()
 
     conn = database.get_connection()
@@ -97,7 +97,7 @@ def test_backfill_game_totals_abbr_skips_populated_rows(monkeypatch, tmp_path):
 def test_backfill_game_totals_abbr_handles_null_abbr(monkeypatch, tmp_path):
     """Rows with NULL abbr also get populated."""
     db_path = str(tmp_path / "test.db")
-    monkeypatch.setattr(database, "DATABASE_PATH", db_path)
+    monkeypatch.setattr(database, "DB_PATH", db_path)
     database.init_db()
 
     conn = database.get_connection()
