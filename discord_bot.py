@@ -324,6 +324,22 @@ def _format_nightly_report(
         sent_picks_by_game: {local_game_id: [pick_dict, ...]}
         mlb_to_local: {mlb_game_id: local_game_id}
     """
+    _CITY_ABBREV = {
+        "Arizona Diamondbacks": "ARI", "Atlanta Braves": "ATL", "Baltimore Orioles": "BAL",
+        "Boston Red Sox": "BOS", "Chicago Cubs": "CHC", "Chicago White Sox": "CHW",
+        "Cincinnati Reds": "CIN", "Cleveland Guardians": "CLE", "Colorado Rockies": "COL",
+        "Detroit Tigers": "DET", "Houston Astros": "HOU", "Kansas City Royals": "KC",
+        "Los Angeles Angels": "LAA", "Los Angeles Dodgers": "LAD", "Miami Marlins": "MIA",
+        "Milwaukee Brewers": "MIL", "Minnesota Twins": "MIN", "New York Mets": "NYM",
+        "New York Yankees": "NYY", "Oakland Athletics": "OAK", "Philadelphia Phillies": "PHI",
+        "Pittsburgh Pirates": "PIT", "San Diego Padres": "SD", "San Francisco Giants": "SF",
+        "Seattle Mariners": "SEA", "St. Louis Cardinals": "STL", "Tampa Bay Rays": "TB",
+        "Texas Rangers": "TEX", "Toronto Blue Jays": "TOR", "Washington Nationals": "WSH",
+    }
+
+    def _abbrev(team: str) -> str:
+        return _CITY_ABBREV.get(team, team.split()[-1][:3].upper())
+
     today = date.today().strftime("%B %d, %Y")
     wins = results.get("wins", 0)
     losses = results.get("losses", 0)
@@ -352,8 +368,8 @@ def _format_nightly_report(
         pick = ml_picks[0]
         away = entry.get("away_team", "?")
         home = entry.get("home_team", "?")
-        away_short = away.split()[-1][:3].upper()
-        home_short = home.split()[-1][:3].upper()
+        away_short = _abbrev(away)
+        home_short = _abbrev(home)
         pick_team = pick.get("pick_team", "?")
         pick_short = pick_team.split()[-1]
         conf = pick.get("confidence", "?")
@@ -386,7 +402,7 @@ def _format_nightly_report(
         lines.append(
             f"{result_emoji} {away_short} @ {home_short}  →  "
             f"{pick_short} {pick_type_label}{odds_str}  {int(win_prob)}% · {conf}/10  "
-            f"{score_str}  **{result_word}**"
+            f"{score_str}  {result_word}"
         )
         sent_any = True
 
@@ -395,7 +411,23 @@ def _format_nightly_report(
 
     total_picks = wins + losses
     if total_picks > 0:
-        lines.append(f"📊 **{wins}W-{losses}L · ROI {roi_str}**")
+        if wins == total_picks:
+            conf_label = "PERFECT DAY"
+            conf_left = "🔥"
+            conf_right = "💰"
+        elif wins / total_picks >= 0.65:
+            conf_label = "ON FIRE"
+            conf_left = "🔥"
+            conf_right = "💰"
+        elif wins / total_picks >= 0.50:
+            conf_label = "SOLID"
+            conf_left = "📈"
+            conf_right = "✅"
+        else:
+            conf_label = "ROUGH DAY"
+            conf_left = "📉"
+            conf_right = "😬"
+        lines.append(f"{conf_left} **{wins}W-{losses}L · {conf_label} · ROI {roi_str}** {conf_right}")
     lines.append("")
 
     # ── Section 2: ML Board ──────────────────────────────────
@@ -406,8 +438,8 @@ def _format_nightly_report(
         conf = entry.get("ml_confidence", 0)
         away = entry.get("away_team", "?")
         home = entry.get("home_team", "?")
-        away_short = away.split()[-1][:3].upper()
-        home_short = home.split()[-1][:3].upper()
+        away_short = _abbrev(away)
+        home_short = _abbrev(home)
         pick_team = entry.get("ml_pick_team", "?")
         pick_short = pick_team.split()[-1]
 
@@ -450,7 +482,24 @@ def _format_nightly_report(
 
     ml_total = ml_correct + ml_incorrect
     ml_pct = round(ml_correct / ml_total * 100, 1) if ml_total > 0 else 0
-    lines.append(f"📊 **{ml_correct}W-{ml_incorrect}L · {ml_pct}%**")
+    if ml_total > 0:
+        if ml_pct >= 80:
+            ml_label = "MODEL ON FIRE"
+            ml_left = "📈"
+            ml_right = "🔥"
+        elif ml_pct >= 65:
+            ml_label = "SOLID"
+            ml_left = "📈"
+            ml_right = "✅"
+        elif ml_pct >= 50:
+            ml_label = "AVERAGE"
+            ml_left = "➡️"
+            ml_right = "📊"
+        else:
+            ml_label = "COLD"
+            ml_left = "📉"
+            ml_right = "❄️"
+        lines.append(f"{ml_left} **{ml_correct}W-{ml_incorrect}L · {ml_pct}% · {ml_label}** {ml_right}")
     lines.append("")
 
     # ── Section 3: O/U Board ─────────────────────────────────
@@ -463,8 +512,8 @@ def _format_nightly_report(
 
         away = entry.get("away_team", "?")
         home = entry.get("home_team", "?")
-        away_short = away.split()[-1][:3].upper()
-        home_short = home.split()[-1][:3].upper()
+        away_short = _abbrev(away)
+        home_short = _abbrev(home)
 
         direction_emoji = "🔼" if ou_pick == "over" else "🔽"
         direction_label = "O" if ou_pick == "over" else "U"
@@ -500,7 +549,20 @@ def _format_nightly_report(
         lines.extend(ou_lines)
         ou_total = ou_correct + ou_incorrect
         ou_pct = round(ou_correct / ou_total * 100, 1) if ou_total > 0 else 0
-        lines.append(f"📊 **{ou_correct}W-{ou_incorrect}L · {ou_pct}%**")
+        if ou_total > 0:
+            if ou_pct >= 65:
+                ou_label = "TOTALS SHARP"
+                ou_left = "📈"
+                ou_right = "💰"
+            elif ou_pct >= 50:
+                ou_label = "TOTALS OK"
+                ou_left = "➡️"
+                ou_right = "📊"
+            else:
+                ou_label = "TOTALS ROUGH"
+                ou_left = "📉"
+                ou_right = "😬"
+            lines.append(f"{ou_left} **{ou_correct}W-{ou_incorrect}L · {ou_pct}% · {ou_label}** {ou_right}")
 
     return "\n".join(lines)
 
