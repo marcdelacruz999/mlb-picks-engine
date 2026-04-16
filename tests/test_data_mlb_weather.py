@@ -154,3 +154,97 @@ def test_collect_game_totals_missing_venue_skips_weather(tmp_path, monkeypatch):
 
     assert row is not None
     assert row[0] is None
+
+
+def test_backfill_game_totals_weather_updates_null_rows(tmp_path, monkeypatch):
+    """backfill_game_totals_weather() updates rows where temp_f IS NULL."""
+    import database
+    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+
+    # Insert a game_totals row with NULL weather
+    conn = database.get_connection()
+    conn.execute("""
+        INSERT OR IGNORE INTO game_totals
+            (mlb_game_id, game_date, home_team_id, away_team_id, home_team_abbr, away_team_abbr)
+        VALUES (888001, '2026-04-10', 143, 119, 'PHI', 'LAD')
+    """)
+    conn.commit()
+    conn.close()
+
+    mock_sched_resp = MagicMock()
+    mock_sched_resp.status_code = 200
+    mock_sched_resp.json.return_value = {
+        "dates": [{"games": [{"venue": {"id": 2392}, "gameDate": "2026-04-10T18:05:00Z"}]}]
+    }
+
+    with patch("data_mlb.requests.get", return_value=mock_sched_resp), \
+         patch("data_mlb.fetch_venue_weather", return_value={"temp_f": 65.0, "wind_mph": 7.0, "wind_dir": "NE"}):
+        import data_mlb
+        count = data_mlb.backfill_game_totals_weather()
+
+    assert count >= 1
+    conn = database.get_connection()
+    row = conn.execute(
+        "SELECT temp_f, wind_mph, wind_dir FROM game_totals WHERE mlb_game_id = 888001"
+    ).fetchone()
+    conn.close()
+    assert row[0] == 65.0
+    assert row[1] == 7.0
+    assert row[2] == "NE"
+
+
+def test_backfill_game_totals_weather_skips_populated_rows(tmp_path, monkeypatch):
+    """backfill_game_totals_weather() skips rows that already have temp_f populated."""
+    import database
+    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+
+    # Insert a row WITH weather already populated
+    conn = database.get_connection()
+    conn.execute("""
+        INSERT OR IGNORE INTO game_totals
+            (mlb_game_id, game_date, home_team_id, away_team_id, home_team_abbr, away_team_abbr,
+             temp_f, wind_mph, wind_dir)
+        VALUES (888002, '2026-04-10', 143, 119, 'PHI', 'LAD', 70.0, 5.0, 'S')
+    """)
+    conn.commit()
+    conn.close()
+
+    with patch("data_mlb.requests.get") as mock_get, \
+         patch("data_mlb.fetch_venue_weather") as mock_weather:
+        import data_mlb
+        count = data_mlb.backfill_game_totals_weather()
+
+    # Row 888002 already has weather — should not be touched
+    mock_get.assert_not_called()
+    mock_weather.assert_not_called()
+    assert count == 0
+
+
+def test_backfill_game_totals_weather_handles_api_failure(tmp_path, monkeypatch):
+    """backfill_game_totals_weather() skips games where MLB API fails, returns 0."""
+    import database
+    monkeypatch.setattr("database.DATABASE_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+
+    conn = database.get_connection()
+    conn.execute("""
+        INSERT OR IGNORE INTO game_totals
+            (mlb_game_id, game_date, home_team_id, away_team_id, home_team_abbr, away_team_abbr)
+        VALUES (888003, '2026-04-10', 143, 119, 'PHI', 'LAD')
+    """)
+    conn.commit()
+    conn.close()
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.json.return_value = {}
+
+    with patch("data_mlb.requests.get", return_value=mock_resp), \
+         patch("data_mlb.fetch_venue_weather") as mock_weather:
+        import data_mlb
+        count = data_mlb.backfill_game_totals_weather()
+
+    mock_weather.assert_not_called()
+    assert count == 0

@@ -1516,3 +1516,46 @@ def backfill_game_totals(start_date: str = None, end_date: str = None) -> int:
 
     print(f"[DATA] backfill_game_totals: {total} games stored ({start_date} to {end_date})")
     return total
+
+
+def backfill_game_totals_weather() -> int:
+    """
+    Backfill temp_f, wind_mph, wind_dir for game_totals rows where temp_f IS NULL.
+    Fetches game time from MLB API, then weather from Open-Meteo historical data.
+    Returns count of rows successfully updated.
+    """
+    rows = db.get_game_totals_missing_weather()  # returns list of (mlb_game_id, game_date)
+    updated = 0
+    for mlb_game_id, game_date in rows:
+        try:
+            # Get game time UTC from MLB API
+            sched_url = f"{MLB_BASE}/schedule?gamePks={mlb_game_id}"
+            resp = requests.get(sched_url, timeout=10)
+            venue_id = None
+            game_time_utc = ""
+            if resp.status_code == 200:
+                dates = resp.json().get("dates", [])
+                if dates:
+                    games = dates[0].get("games", [])
+                    if games:
+                        venue_id = games[0].get("venue", {}).get("id")
+                        game_time_utc = games[0].get("gameDate", "")
+
+            if not venue_id:
+                continue
+
+            weather = fetch_venue_weather(venue_id, game_date, game_time_utc) or {}
+            if weather.get("temp_f") is not None:
+                db.update_game_total_weather(
+                    mlb_game_id,
+                    weather.get("temp_f"),
+                    weather.get("wind_mph"),
+                    weather.get("wind_dir"),
+                )
+                updated += 1
+            time.sleep(1.0)
+        except Exception as e:
+            print(f"[WEATHER BACKFILL] Failed for game {mlb_game_id}: {e}")
+            continue
+    print(f"[WEATHER BACKFILL] Updated {updated}/{len(rows)} rows")
+    return updated
