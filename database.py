@@ -232,6 +232,17 @@ def init_db():
         UNIQUE(game_date, mlb_game_id, side)
     );
 
+    CREATE TABLE IF NOT EXISTS lineup_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mlb_game_id INTEGER NOT NULL,
+        game_date TEXT NOT NULL,
+        ops_actual REAL,
+        ops_expected REAL,
+        pct_drop REAL,
+        created_at TEXT DEFAULT (datetime('now')),
+        UNIQUE(mlb_game_id, game_date)
+    );
+
     CREATE TABLE IF NOT EXISTS pitcher_game_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mlb_game_id INTEGER,
@@ -411,6 +422,24 @@ def init_db():
         conn.execute("DROP TABLE picks_old")
         conn.commit()
         print("[DB] Migrated picks table: removed pick_type CHECK constraint.")
+
+    # Migrate: add lineup_alerts table if not present (added 2026-04-15)
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS lineup_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mlb_game_id INTEGER NOT NULL,
+                game_date TEXT NOT NULL,
+                ops_actual REAL,
+                ops_expected REAL,
+                pct_drop REAL,
+                created_at TEXT DEFAULT (datetime('now')),
+                UNIQUE(mlb_game_id, game_date)
+            )
+        """)
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
 
     conn.close()
     print("[DB] Database initialized.")
@@ -1423,3 +1452,27 @@ def ou_board_needs_update(game_date: str, interval_hours: int = 3) -> bool:
     last = datetime.fromisoformat(row["updated_at"])
     hours_elapsed = (datetime.utcnow() - last).total_seconds() / 3600
     return hours_elapsed >= interval_hours
+
+
+def lineup_alert_already_sent(mlb_game_id: int, game_date: str) -> bool:
+    """Return True if a lineup alert has already been sent for this game today."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT id FROM lineup_alerts WHERE mlb_game_id=? AND game_date=?",
+        (mlb_game_id, game_date)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def save_lineup_alert(mlb_game_id: int, game_date: str, ops_actual: float, ops_expected: float, pct_drop: float) -> None:
+    """Record that a lineup alert was sent for this game. INSERT OR IGNORE for dedup."""
+    conn = get_connection()
+    conn.execute(
+        """INSERT OR IGNORE INTO lineup_alerts
+           (mlb_game_id, game_date, ops_actual, ops_expected, pct_drop)
+           VALUES (?, ?, ?, ?, ?)""",
+        (mlb_game_id, game_date, ops_actual, ops_expected, pct_drop)
+    )
+    conn.commit()
+    conn.close()
