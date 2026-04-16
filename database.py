@@ -1543,6 +1543,18 @@ def save_lineup_alert(mlb_game_id: int, game_date: str, ops_actual: float, ops_e
     conn.close()
 
 
+def get_team_abbr_by_mlb_id(mlb_id) -> str:
+    """Return team abbreviation for the given MLB API team ID, or '' if not found."""
+    if mlb_id is None:
+        return ""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT abbreviation FROM teams WHERE mlb_id = ?", (mlb_id,)
+    ).fetchone()
+    conn.close()
+    return row[0] if row and row[0] else ""
+
+
 def store_game_totals(records: list) -> None:
     """
     Upsert game_totals rows. Each record is a dict with keys:
