@@ -1008,6 +1008,45 @@ def get_pitcher_rolling_stats_adjusted(pitcher_id: int, days: int = 21,
     }
 
 
+def get_pitcher_vs_team_history(pitcher_id: int, opponent_team_id: int, days: int = 365) -> "dict | None":
+    """
+    Historical performance for a specific pitcher vs a specific opponent team.
+    Queries pitcher_game_logs WHERE pitcher_id=? AND opponent_team_id=? AND game_date >= cutoff
+      AND innings_pitched > 0 AND is_starter = 1
+    Requires >= 2 starts vs this opponent in window.
+    Returns: {"starts": int, "era_vs_team": float, "whip_vs_team": float, "k9_vs_team": float, "avg_ip": float}
+      era_vs_team = (earned_runs * 9) / max(innings_pitched, 0.1)
+      whip_vs_team = (hits + walks) / max(innings_pitched, 0.1)
+      k9_vs_team = strikeouts * 9 / max(innings_pitched, 0.1)
+    Returns None if fewer than 2 starts.
+    """
+    cutoff = date.today() - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT innings_pitched, earned_runs, strikeouts, walks, hits
+        FROM pitcher_game_logs
+        WHERE pitcher_id=? AND opponent_team_id=? AND game_date >= ?
+          AND innings_pitched > 0 AND is_starter = 1
+        ORDER BY game_date DESC
+    """, (pitcher_id, opponent_team_id, cutoff.isoformat())).fetchall()
+    conn.close()
+    if len(rows) < 2:
+        return None
+    total_ip = sum(r["innings_pitched"] for r in rows)
+    total_er = sum(r["earned_runs"] for r in rows)
+    total_k = sum(r["strikeouts"] for r in rows)
+    total_bb = sum(r["walks"] for r in rows)
+    total_h = sum(r["hits"] for r in rows)
+    safe_ip = max(total_ip, 0.1)
+    return {
+        "starts": len(rows),
+        "era_vs_team": round(total_er * 9 / safe_ip, 2),
+        "whip_vs_team": round((total_h + total_bb) / safe_ip, 3),
+        "k9_vs_team": round(total_k * 9 / safe_ip, 2),
+        "avg_ip": round(total_ip / len(rows), 2),
+    }
+
+
 def get_team_batting_rolling(team_id: int, days: int = 14,
                               as_of_date: str = None) -> "dict | None":
     """

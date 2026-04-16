@@ -168,3 +168,11 @@ Each entry uses an HTML comment marker for reliable ID matching:
 **Date:** 2026-04-15
 **Commit:** feat: add batter game logs and hot/cold streak signal to offense agent
 **Summary:** batter_game_logs table added to database.py with collect_batter_boxscores(), get_team_batter_hot_cold(), and per-team K-rate/rolling OPS helpers. Hot/cold streak signal integrated into score_offense() in analysis.py — bonus/penalty of ±0.04 when hot_count - cold_count >= 2. collect_batter_boxscores() called in engine.py --results run. 5 tests in tests/test_batter_logs.py covering table init, API parsing, hot/cold logic, and insufficient-data fallback.
+
+---
+
+<!-- id: pitcher_vs_team -->
+## Pitcher vs Team Matchup History
+**Date:** 2026-04-16
+**Commit:** feat: add pitcher vs team matchup history signal to pitching agent
+**Summary:** get_pitcher_vs_team_history(pitcher_id, opponent_team_id, days=365) added to database.py — queries pitcher_game_logs for starts vs a specific opponent (requires ≥2 starts). Integrated into score_pitching() in analysis.py: if SP's ERA vs this team deviates ≥0.75 from their blended season ERA, applies ±0.06 score adjustment and appends a matchup note to the edge string. 6 tests in tests/test_pitcher_vs_team.py covering None on <2 starts, correct ERA/WHIP/K9 math, relief exclusion, days-window cutoff, opponent isolation, and score_pitching integration.

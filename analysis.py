@@ -28,6 +28,11 @@ def score_pitching(game: dict) -> dict:
     if not home_p or not away_p:
         return {"score": 0.0, "edge": "Insufficient pitcher data", "detail": {}}
 
+    away_pitcher_id = game.get("away_pitcher_id")
+    home_pitcher_id = game.get("home_pitcher_id")
+    away_team_id = game.get("away_team_mlb_id") or game.get("away_team_id")
+    home_team_id = game.get("home_team_mlb_id") or game.get("home_team_id")
+
     # Blend rolling stats if available
     away_rolling = game.get("away_pitcher_rolling") or {}
     home_rolling = game.get("home_pitcher_rolling") or {}
@@ -144,6 +149,56 @@ def score_pitching(game: dict) -> dict:
 
     if rest_notes:
         edge += f" | {rest_notes[0]}"
+
+    # ── Pitcher vs team matchup history adjustment ──
+    matchup_notes = []
+    away_vs_home = None
+    home_vs_away = None
+
+    if away_pitcher_id is not None and home_team_id is not None:
+        try:
+            away_vs_home = _analysis_db.get_pitcher_vs_team_history(away_pitcher_id, home_team_id)
+        except Exception:
+            away_vs_home = None
+
+    if home_pitcher_id is not None and away_team_id is not None:
+        try:
+            home_vs_away = _analysis_db.get_pitcher_vs_team_history(home_pitcher_id, away_team_id)
+        except Exception:
+            home_vs_away = None
+
+    if away_vs_home is not None:
+        era_vt = away_vs_home["era_vs_team"]
+        starts = away_vs_home["starts"]
+        if era_vt < away_era - 0.75:
+            score -= 0.06
+            matchup_notes.append(
+                f"Away SP ERA vs this team ({starts} starts): {era_vt:.2f} — dominates"
+            )
+        elif era_vt > away_era + 0.75:
+            score += 0.06
+            matchup_notes.append(
+                f"Away SP ERA vs this team ({starts} starts): {era_vt:.2f} — struggles"
+            )
+
+    if home_vs_away is not None:
+        era_vt = home_vs_away["era_vs_team"]
+        starts = home_vs_away["starts"]
+        if era_vt < home_era - 0.75:
+            score += 0.06
+            matchup_notes.append(
+                f"Home SP ERA vs this team ({starts} starts): {era_vt:.2f} — dominates"
+            )
+        elif era_vt > home_era + 0.75:
+            score -= 0.06
+            matchup_notes.append(
+                f"Home SP ERA vs this team ({starts} starts): {era_vt:.2f} — struggles"
+            )
+
+    score = _clamp(score)
+
+    if matchup_notes:
+        edge += f" | {matchup_notes[0]}"
 
     # Note when splits or rolling are active
     notes_parts = []
