@@ -1421,6 +1421,8 @@ def collect_game_totals(game_date: str) -> list:
             home_team_id = home_info.get("id")
             away_abbr = db.get_team_abbr_by_mlb_id(away_team_id)
             home_abbr = db.get_team_abbr_by_mlb_id(home_team_id)
+            venue_id = game.get("venue", {}).get("id")
+            game_time_utc = game.get("gameDate", "")
 
             # Scores from linescore hydration
             linescore = game.get("linescore", {})
@@ -1449,6 +1451,13 @@ def collect_game_totals(game_date: str) -> list:
             total_runs = away_runs + home_runs
             park_factor = PARK_FACTORS.get(home_abbr, 1.00)
 
+            weather = {}
+            if venue_id:
+                try:
+                    weather = fetch_venue_weather(venue_id, game_date, game_time_utc) or {}
+                except Exception:
+                    weather = {}
+
             records.append({
                 "mlb_game_id": game_pk,
                 "game_date": game_date,
@@ -1467,9 +1476,9 @@ def collect_game_totals(game_date: str) -> list:
                 "home_sp_era": None,
                 "away_sp_era": None,
                 "park_factor": park_factor,
-                "temp_f": None,
-                "wind_mph": None,
-                "wind_dir": None,
+                "temp_f": weather.get("temp_f"),
+                "wind_mph": weather.get("wind_mph"),
+                "wind_dir": weather.get("wind_dir"),
             })
 
     print(f"[DATA] collect_game_totals {game_date}: {len(records)} final games")
