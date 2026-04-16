@@ -98,6 +98,48 @@ def fetch_lineup_batting(player_ids: list) -> list:
     return results
 
 
+def get_current_lineups(mlb_game_id: int) -> dict:
+    """Fetch current lineup confirmation status for a single game.
+
+    Returns:
+        {
+            "away_ids": [int, ...],
+            "home_ids": [int, ...],
+            "away_confirmed": bool,
+            "home_confirmed": bool,
+            "game_status": str,  # e.g. "Preview", "Pre-Game", "Live", "Final"
+        }
+    """
+    url = f"{MLB_BASE}/schedule?gamePks={mlb_game_id}&hydrate=lineups"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"[DATA] Error fetching lineups for game {mlb_game_id}: {e}")
+        return {"away_ids": [], "home_ids": [], "away_confirmed": False, "home_confirmed": False, "game_status": "unknown"}
+
+    try:
+        dates = data.get("dates", [])
+        if not dates:
+            return {"away_ids": [], "home_ids": [], "away_confirmed": False, "home_confirmed": False, "game_status": "unknown"}
+        game = dates[0].get("games", [{}])[0]
+        status = game.get("status", {}).get("detailedState", "unknown")
+        lineups = game.get("lineups", {})
+        away_ids = [p.get("id") for p in lineups.get("awayPlayers", []) if p.get("id")]
+        home_ids = [p.get("id") for p in lineups.get("homePlayers", []) if p.get("id")]
+        return {
+            "away_ids": away_ids,
+            "home_ids": home_ids,
+            "away_confirmed": bool(away_ids),
+            "home_confirmed": bool(home_ids),
+            "game_status": status,
+        }
+    except Exception as e:
+        print(f"[DATA] Error parsing lineup data for game {mlb_game_id}: {e}")
+        return {"away_ids": [], "home_ids": [], "away_confirmed": False, "home_confirmed": False, "game_status": "unknown"}
+
+
 def _parse_ip(ip_str) -> float:
     """
     Convert MLB API innings-pitched string to decimal innings.
