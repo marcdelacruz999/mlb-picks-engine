@@ -505,6 +505,33 @@ def _format_nightly_report(
     return "\n".join(lines)
 
 
+def send_nightly_report(
+    results: dict,
+    log_entries: list,
+    sent_picks_by_game: dict,
+    mlb_to_local: dict,
+) -> bool:
+    """Send the nightly results report to Discord. Returns True on success."""
+    msg = _format_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local)
+
+    if not DISCORD_WEBHOOK_URL:
+        print("[DISCORD] No webhook URL — printing nightly report locally.")
+        print(msg)
+        return False
+
+    try:
+        resp = requests.post(DISCORD_WEBHOOK_URL, json={"content": msg}, timeout=10)
+        if resp.status_code in (200, 204):
+            print("  📤 Nightly report sent to Discord.")
+            return True
+        else:
+            print(f"[DISCORD] Nightly report send failed ({resp.status_code}): {resp.text}")
+            return False
+    except Exception as e:
+        print(f"[DISCORD] Error sending nightly report: {e}")
+        return False
+
+
 # ══════════════════════════════════════════════
 #  WEBHOOK PAYLOAD EXPORT (for debugging)
 # ══════════════════════════════════════════════

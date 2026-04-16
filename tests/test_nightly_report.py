@@ -117,3 +117,19 @@ def test_pass_day_when_no_picks():
         LOG_ENTRIES, {}, MLB_TO_LOCAL
     )
     assert "PASS" in msg
+
+from unittest.mock import patch, MagicMock
+from discord_bot import send_nightly_report
+
+def test_send_nightly_report_no_webhook(monkeypatch):
+    monkeypatch.setattr("discord_bot.DISCORD_WEBHOOK_URL", "")
+    result = send_nightly_report(RESULTS, LOG_ENTRIES, SENT_PICKS_BY_GAME, MLB_TO_LOCAL)
+    assert result is False
+
+def test_send_nightly_report_success(monkeypatch):
+    monkeypatch.setattr("discord_bot.DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/fake")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 204
+    with patch("discord_bot.requests.post", return_value=mock_resp):
+        result = send_nightly_report(RESULTS, LOG_ENTRIES, SENT_PICKS_BY_GAME, MLB_TO_LOCAL)
+    assert result is True
