@@ -1088,9 +1088,12 @@ def _project_score(game: dict, odds_data: dict) -> dict:
     if away_rpg == 0:
         away_rpg = 4.3
 
-    # Adjust by opponent pitching quality
-    home_p_era = _safe(game.get("home_pitching", {}).get("era"))
-    away_p_era = _safe(game.get("away_pitching", {}).get("era"))
+    # Adjust by opponent pitching quality — prefer rolling ERA (recent form) over season ERA
+    # Rolling ERA lives in game["away_pitcher_rolling"]["era"] (same blend used by score_pitching)
+    away_rolling = game.get("away_pitcher_rolling") or {}
+    home_rolling = game.get("home_pitcher_rolling") or {}
+    home_p_era = _safe(home_rolling.get("era")) or _safe(game.get("home_pitching", {}).get("era"))
+    away_p_era = _safe(away_rolling.get("era")) or _safe(game.get("away_pitching", {}).get("era"))
     lg_avg_era = 4.20  # approximate league average
 
     # Away team scores adjusted by home pitching; Home team by away pitching
@@ -1128,12 +1131,15 @@ def _project_score(game: dict, odds_data: dict) -> dict:
     away_projected *= wx_multiplier
     home_projected *= wx_multiplier
 
-    # Blend with total line if available
+    # Capture raw model total before blending — used by _analyze_over_under()
+    # to measure true model edge against the market line (uncontaminated by it)
+    raw_model_total = away_projected + home_projected
+
+    # Blend with total line if available (for projected score display only)
     if odds_data and odds_data.get("consensus", {}).get("total_line"):
         total_line = odds_data["consensus"]["total_line"]
-        model_total = away_projected + home_projected
-        blended_total = (model_total * 0.6) + (total_line * 0.4)
-        ratio = blended_total / max(model_total, 0.1)
+        blended_total = (raw_model_total * 0.6) + (total_line * 0.4)
+        ratio = blended_total / max(raw_model_total, 0.1)
         away_projected *= ratio
         home_projected *= ratio
 
@@ -1141,6 +1147,7 @@ def _project_score(game: dict, odds_data: dict) -> dict:
         "away": round(away_projected, 1),
         "home": round(home_projected, 1),
         "total": round(away_projected + home_projected, 1),
+        "raw_total": round(raw_model_total, 1),
     }
 
 
@@ -1165,7 +1172,9 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
         _sp_thin_note = None
 
     total_line = odds_data["consensus"]["total_line"]
-    model_total = projected["total"]
+    # Use raw_total (pre-blend) to measure true model edge — blended total is
+    # contaminated with 40% of the market line and understates our actual edge
+    model_total = projected.get("raw_total") or projected["total"]
     diff = model_total - total_line
 
     if abs(diff) < 0.5:
@@ -1490,7 +1499,11 @@ def risk_filter(analyses: list) -> list:
                 print(f"[CONVICTION GATE] O/U rejected: {ou['pick'].upper()} "
                       f"(gap {run_gap:.1f} runs < {OU_CONVICTION_GAP} required)")
                 continue
-            ev_ou = _calculate_ev(ou["confidence"] / 10 * 100, ou_odds)
+            # O/U EV: confidence is NOT a probability — map confidence tiers to estimated
+            # win probabilities calibrated around the -110 breakeven (52.4%).
+            # conf 9 → 54.0%, conf 8 → 52.4% (breakeven), conf 7 → 50.8%, conf 6 → 49.2%
+            ou_win_prob = 49.2 + (ou["confidence"] - 6) * 1.6
+            ev_ou = _calculate_ev(ou_win_prob, ou_odds)
 
             if ev_ou is not None and ev_ou < MIN_EV:
                 print(f"[EV GATE] O/U rejected: {ou['pick'].upper()} "
@@ -1520,7 +1533,7 @@ def risk_filter(analyses: list) -> list:
                     "analysis": a,
                     "ou_odds": ou_odds,
                     "ev_score": ev_ou,
-                    "kelly_fraction": kelly_stake(ou["confidence"] / 10 * 100, ou_odds),
+                    "kelly_fraction": kelly_stake(ou_win_prob, ou_odds),
                 }
                 approved.append(ou_dict)
 
