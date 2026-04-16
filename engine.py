@@ -23,7 +23,7 @@ import database as db
 from data_mlb import collect_game_data, fetch_all_teams, fetch_todays_games
 from data_odds import fetch_odds, match_odds_to_game, implied_probability, fetch_f5_odds, match_f5_odds_to_game
 from analysis import analyze_game, risk_filter, build_watchlist
-from discord_bot import send_pick, send_pick_edit, send_update, send_results, send_daily_board, send_ou_board, export_payload, _format_game_time
+from discord_bot import send_pick, send_pick_edit, send_update, send_results, send_nightly_report, send_daily_board, send_ou_board, export_payload, _format_game_time
 from config import DISCORD_WEBHOOK_URL
 
 
@@ -814,6 +814,24 @@ def run_results():
             sent_picks_by_game[gid] = []
         sent_picks_by_game[gid].append(p)
 
+    # Build mlb_game_id -> local game_id map for nightly report
+    mlb_to_local = {}
+    for p in picks:
+        game_row = conn.execute(
+            "SELECT id, mlb_game_id FROM games WHERE id=?", (p["game_id"],)
+        ).fetchone()
+        if game_row:
+            mlb_to_local[game_row["mlb_game_id"]] = game_row["id"]
+    # Also cover games in log_entries that had no sent pick
+    for entry in log_entries:
+        mid = entry.get("mlb_game_id")
+        if mid and mid not in mlb_to_local:
+            game_row = conn.execute(
+                "SELECT id FROM games WHERE mlb_game_id=?", (mid,)
+            ).fetchone()
+            if game_row:
+                mlb_to_local[mid] = game_row["id"]
+
     all_games_lines = []
     for entry in sorted(log_entries, key=lambda e: e.get("away_team", "")):
         mlb_game_id = entry["mlb_game_id"]
@@ -900,68 +918,8 @@ def run_results():
 
     print(f"\n  Record: {wins}W - {losses}L - {pushes}P  |  ROI: {roi}%")
 
-    # Send ML recap to Discord
-    sent = send_results(results)
-    if sent:
-        print("  📤 Results recap sent to Discord.")
-
-    # ── Send O/U results board (all games with O/U pick + outcome) ──
-    ou_results_lines = []
-    for entry in log_entries:
-        away = entry.get("away_team", "?")
-        home = entry.get("home_team", "?")
-        away_short = away.split()[-1] if away else "?"
-        home_short = home.split()[-1] if home else "?"
-        ou_pick = entry.get("ou_pick")
-        ou_line_val = entry.get("ou_line")
-        ou_status = entry.get("ou_status", "none")
-        away_sc = entry.get("actual_away_score")
-        home_sc = entry.get("actual_home_score")
-        total_sc = (away_sc + home_sc) if (away_sc is not None and home_sc is not None) else None
-
-        if not ou_pick or not ou_line_val:
-            continue
-
-        ou_emoji = "🔼" if ou_pick == "over" else "🔽"
-        if ou_status == "correct":
-            marker = "✅"
-        elif ou_status == "incorrect":
-            marker = "❌"
-        elif ou_status == "push":
-            marker = "➖"
-        else:
-            marker = "⏳"
-
-        total_str = f"→ Total: {total_sc}" if total_sc is not None else ""
-        ou_results_lines.append(
-            f"{marker} {away_short} @ {home_short} · {ou_emoji} {'OVER' if ou_pick == 'over' else 'UNDER'} {ou_line_val} {total_str}"
-        )
-
-    if ou_results_lines:
-        from datetime import date as _date
-        from zoneinfo import ZoneInfo as _ZI
-        from datetime import datetime as _dt
-        today_str = _date.today().strftime("%B %d, %Y")
-        pt_now = _dt.now(_ZI("America/Los_Angeles")).strftime("%-I:%M %p PT")
-        ou_results_msg = f"🎯 **MLB O/U RESULTS — {today_str}**\n\n"
-        ou_results_msg += "\n".join(ou_results_lines)
-        ou_results_msg += f"\n\n**O/U:** {log_ou_correct}W - {log_ou_incorrect}L"
-        if log_ou_correct + log_ou_incorrect > 0:
-            ou_pct = round(log_ou_correct / (log_ou_correct + log_ou_incorrect) * 100, 1)
-            ou_results_msg += f" ({ou_pct}%)"
-        ou_results_msg += f"\n🕐 *Final — {pt_now}*"
-
-        import requests as _req
-        if DISCORD_WEBHOOK_URL:
-            try:
-                resp = _req.post(f"{DISCORD_WEBHOOK_URL}?wait=true",
-                                 json={"content": ou_results_msg}, timeout=10)
-                if resp.status_code == 200:
-                    print("  📤 O/U results board sent to Discord.")
-                else:
-                    print(f"  [DISCORD] O/U results send failed ({resp.status_code})")
-            except Exception as e:
-                print(f"  [DISCORD] O/U results error: {e}")
+    # ── Send nightly report to Discord ──
+    send_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local)
 
     # ── Collect and store post-game boxscore data ──
     print("\n[DATA] Collecting post-game boxscore data...")
