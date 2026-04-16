@@ -402,7 +402,7 @@ def _format_nightly_report(
         lines.append(
             f"{result_emoji} {away_short} @ {home_short}  →  "
             f"{pick_short} {pick_type_label}{odds_str}  {int(win_prob)}% · {conf}/10  "
-            f"{score_str}  {result_word}"
+            f"{score_str}  **{result_word}**"
         )
         sent_any = True
 
