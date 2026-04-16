@@ -11,7 +11,10 @@ Webhook URL in `config.py DISCORD_WEBHOOK_URL`. All sends in `discord_bot.py`.
 | Line movement | `⚠️ MLB PICK UPDATE` — Watch | --refresh, ≥5pp ML drop or ≥0.5 total move |
 | Pick cancelled | `⚠️ MLB PICK UPDATE` — Cancel | --refresh, drops below threshold |
 | Reduce confidence | `⚠️ MLB PICK UPDATE` — Reduce | --refresh, conf drops 2+ |
-| Results recap | `✅ MLB DAILY RESULTS` | 11pm --results |
+| ML picks board | `⚾ MLB ML PICKS — [date]` | Hourly run, edits in-place every 3h via PATCH |
+| O/U picks board | `🎯 MLB O/U PICKS — [date]` | Hourly run, edits in-place every 3h via PATCH |
+| ML results recap | `📊 MLB DAILY RESULTS` | 11pm --results |
+| O/U results recap | `🎯 MLB O/U RESULTS — [date]` | 11pm --results, separate message |
 | Optimizer report | `⚙️ MLB ENGINE — DAILY OPTIMIZER REPORT` | 11:30pm nightly |
 
 ## Pick Alert Format
