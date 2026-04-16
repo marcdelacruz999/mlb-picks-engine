@@ -468,6 +468,7 @@ def init_db():
         pass
 
     conn.close()
+    backfill_game_totals_abbr()
     print("[DB] Database initialized.")
 
 
@@ -1695,3 +1696,35 @@ def get_game_totals_all(days: int = 90) -> list:
     """, (cutoff,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def backfill_game_totals_abbr() -> int:
+    """
+    Backfill home_team_abbr and away_team_abbr for all game_totals rows
+    where the abbreviation is currently empty or NULL. Joins against the
+    teams table using mlb_id. Idempotent — safe to call repeatedly.
+    Returns count of rows now having both abbreviations populated.
+    """
+    conn = get_connection()
+    conn.execute("""
+        UPDATE game_totals
+        SET home_team_abbr = (
+            SELECT abbreviation FROM teams WHERE mlb_id = game_totals.home_team_id
+        )
+        WHERE (home_team_abbr IS NULL OR home_team_abbr = '')
+          AND home_team_id IS NOT NULL
+    """)
+    conn.execute("""
+        UPDATE game_totals
+        SET away_team_abbr = (
+            SELECT abbreviation FROM teams WHERE mlb_id = game_totals.away_team_id
+        )
+        WHERE (away_team_abbr IS NULL OR away_team_abbr = '')
+          AND away_team_id IS NOT NULL
+    """)
+    conn.commit()
+    row = conn.execute(
+        "SELECT COUNT(*) FROM game_totals WHERE home_team_abbr != '' AND away_team_abbr != ''"
+    ).fetchone()
+    conn.close()
+    return row[0] if row else 0
