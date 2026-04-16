@@ -359,15 +359,17 @@ def _format_nightly_report(
         conf = pick.get("confidence", "?")
         win_prob = pick.get("win_probability", 0)
         odds = pick.get("ml_odds", "")
-        odds_str = f" {odds:+d}" if isinstance(odds, int) else ""
+        odds_str = f" {int(odds):+d}" if isinstance(odds, (int, float)) else ""
         away_sc = entry.get("actual_away_score", 0) or 0
         home_sc = entry.get("actual_home_score", 0) or 0
 
         # Score string: winner name first
         if away_sc > home_sc:
             score_str = f"{away_short} {away_sc}-{home_sc}"
-        else:
+        elif home_sc > away_sc:
             score_str = f"{home_short} {home_sc}-{away_sc}"
+        else:
+            score_str = f"{away_sc}-{home_sc}"
 
         status = entry.get("ml_status", "pending")
         if status == "correct":
@@ -422,8 +424,10 @@ def _format_nightly_report(
         home_sc = entry.get("actual_home_score", 0) or 0
         if away_sc > home_sc:
             score_str = f"{away_short} {away_sc}-{home_sc}"
-        else:
+        elif home_sc > away_sc:
             score_str = f"{home_short} {home_sc}-{away_sc}"
+        else:
+            score_str = f"{away_sc}-{home_sc}"
 
         status = entry.get("ml_status", "pending")
         if status == "correct":
