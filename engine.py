@@ -801,6 +801,31 @@ def run_results():
 
     if total == 0 and pushes == 0:
         print("\nNo picks were newly graded (all already resolved or no final scores matched).")
+        # Still send the nightly report using already-graded data from the DB
+        _sent_picks_by_game: dict = {}
+        for p in picks:
+            gid = p["game_id"]
+            if gid not in _sent_picks_by_game:
+                _sent_picks_by_game[gid] = []
+            _sent_picks_by_game[gid].append(p)
+        _mlb_to_local: dict = {}
+        _conn = db.get_connection()
+        for entry in log_entries:
+            mid = entry.get("mlb_game_id")
+            if mid and mid not in _mlb_to_local:
+                game_row = _conn.execute(
+                    "SELECT id FROM games WHERE mlb_game_id=?", (mid,)
+                ).fetchone()
+                if game_row:
+                    _mlb_to_local[mid] = game_row["id"]
+        _results = {
+            "wins": wins, "losses": losses, "pushes": pushes, "roi": 0.0,
+            "best_pick": "N/A", "worst_miss": "N/A", "notes": "0 newly graded picks",
+            "pick_lines": [], "all_games_lines": [],
+            "ml_correct": log_correct, "ml_incorrect": log_incorrect,
+            "ou_correct": log_ou_correct, "ou_incorrect": log_ou_incorrect,
+        }
+        send_nightly_report(_results, log_entries, _sent_picks_by_game, _mlb_to_local)
         return
 
     roi = round((wins - losses) / max(total, 1) * 100, 1)
