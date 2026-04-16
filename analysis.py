@@ -1263,6 +1263,30 @@ def _analyze_over_under(game: dict, odds_data: dict, projected: dict) -> dict:
     elif park_factor <= 0.92:
         edge_desc += f" | 🏟️ Pitcher's park ({home_abbr} pf={park_factor:.2f})"
 
+    # ── Store model projection in game_totals for bias tracking ──
+    mlb_game_id = game.get("mlb_game_id")
+    if mlb_game_id:
+        try:
+            away_rolling = game.get("away_pitcher_rolling") or {}
+            home_rolling = game.get("home_pitcher_rolling") or {}
+            home_abbr = game.get("home_team_abbr", "")
+            away_abbr = game.get("away_team_abbr", "")
+            weather = game.get("weather") or {}
+            _analysis_db.update_game_total_projection(
+                mlb_game_id=mlb_game_id,
+                model_projected_total=projected.get("raw_total") or projected.get("total"),
+                total_line=total_line,
+                home_sp_era=home_rolling.get("era"),
+                away_sp_era=away_rolling.get("era"),
+                temp_f=weather.get("temp_f"),
+                wind_mph=weather.get("wind_mph"),
+                wind_dir=weather.get("wind_dir"),
+                home_team_abbr=home_abbr or None,
+                away_team_abbr=away_abbr or None,
+            )
+        except Exception:
+            pass  # never block picks on a logging failure
+
     return {"pick": pick, "confidence": int(round(conf)), "edge": edge_desc, "total_line": total_line}
 
 

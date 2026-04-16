@@ -1613,6 +1613,54 @@ def get_game_totals_for_bias(days: int = 90) -> list:
     return [dict(r) for r in rows]
 
 
+def update_game_total_projection(mlb_game_id: int, model_projected_total: float,
+                                  total_line: Optional[float] = None,
+                                  ou_result: Optional[str] = None,
+                                  home_sp_id: Optional[int] = None,
+                                  away_sp_id: Optional[int] = None,
+                                  home_sp_era: Optional[float] = None,
+                                  away_sp_era: Optional[float] = None,
+                                  temp_f: Optional[float] = None,
+                                  wind_mph: Optional[float] = None,
+                                  wind_dir: Optional[str] = None,
+                                  home_team_abbr: Optional[str] = None,
+                                  away_team_abbr: Optional[str] = None) -> None:
+    """
+    Update an existing game_totals row with the model's projected total and
+    contextual fields used by analyze_ou_bias(). Called by analysis.py each
+    time _analyze_over_under() evaluates a game.
+    """
+    conn = get_connection()
+    fields = ["model_projected_total = ?"]
+    values: list = [model_projected_total]
+    if total_line is not None:
+        fields.append("total_line = ?"); values.append(total_line)
+    if ou_result is not None:
+        fields.append("ou_result = ?"); values.append(ou_result)
+    if home_sp_id is not None:
+        fields.append("home_sp_id = ?"); values.append(home_sp_id)
+    if away_sp_id is not None:
+        fields.append("away_sp_id = ?"); values.append(away_sp_id)
+    if home_sp_era is not None:
+        fields.append("home_sp_era = ?"); values.append(home_sp_era)
+    if away_sp_era is not None:
+        fields.append("away_sp_era = ?"); values.append(away_sp_era)
+    if temp_f is not None:
+        fields.append("temp_f = ?"); values.append(temp_f)
+    if wind_mph is not None:
+        fields.append("wind_mph = ?"); values.append(wind_mph)
+    if wind_dir is not None:
+        fields.append("wind_dir = ?"); values.append(wind_dir)
+    if home_team_abbr is not None:
+        fields.append("home_team_abbr = ?"); values.append(home_team_abbr)
+    if away_team_abbr is not None:
+        fields.append("away_team_abbr = ?"); values.append(away_team_abbr)
+    values.append(mlb_game_id)
+    conn.execute(f"UPDATE game_totals SET {', '.join(fields)} WHERE mlb_game_id = ?", values)
+    conn.commit()
+    conn.close()
+
+
 def get_game_totals_all(days: int = 90) -> list:
     """
     Return all game_totals rows (including those without model projection),
