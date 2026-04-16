@@ -199,3 +199,106 @@ def test_run_lineup_monitor_skips_lineups_not_posted(monkeypatch):
 
     monitor.run_lineup_monitor()
     assert alert_sent == []
+
+
+def _make_monitor_mocks(monkeypatch, pct_drop_actual, num_players_with_ops=9):
+    """Helper: wire up full monitor stack with controllable OPS values."""
+    import monitor, database as db, data_mlb
+
+    monkeypatch.setattr(db, "get_today_picks", lambda: [
+        {"game_id": 1, "status": "pending", "pick_team": "Houston Astros"}
+    ])
+    monkeypatch.setattr(db, "get_today_analysis_log", lambda: [
+        {"mlb_game_id": 745444, "away_team": "Colorado Rockies", "home_team": "Houston Astros",
+         "ml_pick_team": "Houston Astros", "ml_confidence": 7, "game": "COL @ HOU"}
+    ])
+    monkeypatch.setattr(db, "lineup_alert_already_sent", lambda gid, d: False)
+    monkeypatch.setattr(monitor, "save_lineup_alert", lambda *a, **kw: None)
+
+    # games table row
+    game_row_data = {"mlb_game_id": 745444, "away_team_id": 10, "home_team_id": 20}
+    # teams table row
+    team_row_data = {"mlb_id": 117}  # HOU mlb_id
+
+    class FakeConn:
+        def execute(self, q, params=None):
+            class FakeResult:
+                def fetchone(self):
+                    if "games" in q:
+                        return game_row_data
+                    if "teams" in q:
+                        return team_row_data
+                    return None
+            return FakeResult()
+        def close(self): pass
+
+    monkeypatch.setattr(db, "get_connection", lambda: FakeConn())
+
+    monkeypatch.setattr(data_mlb, "get_current_lineups", lambda gid: {
+        "away_ids": list(range(1, 10)),
+        "home_ids": list(range(101, 110)),
+        "away_confirmed": True, "home_confirmed": True, "game_status": "Pre-Game",
+    })
+
+    # Expected OPS = 0.750; actual OPS controlled via pct_drop_actual
+    expected_ops = 0.750
+    actual_ops = expected_ops * (1 - pct_drop_actual)
+
+    # fetch_lineup_batting returns num_players_with_ops players with OPS data
+    player_stats = [{"player_id": 100 + i, "ops": actual_ops, "obp": 0.33, "slg": 0.40}
+                    for i in range(num_players_with_ops)]
+    monkeypatch.setattr(monitor, "fetch_lineup_batting", lambda ids: player_stats)
+
+    monkeypatch.setattr(monitor, "get_batter_rolling_ops", lambda pid: None)  # use season OPS only
+
+    monkeypatch.setattr(monitor, "fetch_team_batting", lambda tid: {"ops": expected_ops})
+
+    return monitor
+
+
+def test_run_lineup_monitor_fires_alert_on_ops_drop(monkeypatch):
+    """Alert sent when pick team lineup OPS is >10% below expected."""
+    import monitor, database as db
+
+    alert_sent = []
+    mon = _make_monitor_mocks(monkeypatch, pct_drop_actual=0.15)  # 15% drop
+    monkeypatch.setattr(mon, "send_lineup_alert", lambda *a, **kw: alert_sent.append(True) or True)
+
+    mon.run_lineup_monitor()
+    assert len(alert_sent) == 1
+
+
+def test_run_lineup_monitor_no_alert_on_small_drop(monkeypatch):
+    """No alert when OPS drop is below 10% threshold."""
+    import monitor
+
+    alert_sent = []
+    mon = _make_monitor_mocks(monkeypatch, pct_drop_actual=0.05)  # 5% drop
+    monkeypatch.setattr(mon, "send_lineup_alert", lambda *a, **kw: alert_sent.append(True) or True)
+
+    mon.run_lineup_monitor()
+    assert alert_sent == []
+
+
+def test_run_lineup_monitor_no_alert_on_ops_improvement(monkeypatch):
+    """No alert when confirmed lineup OPS is better than expected."""
+    import monitor
+
+    alert_sent = []
+    mon = _make_monitor_mocks(monkeypatch, pct_drop_actual=-0.05)  # 5% improvement
+    monkeypatch.setattr(mon, "send_lineup_alert", lambda *a, **kw: alert_sent.append(True) or True)
+
+    mon.run_lineup_monitor()
+    assert alert_sent == []
+
+
+def test_run_lineup_monitor_skips_when_fewer_than_5_players_have_data(monkeypatch):
+    """No alert when fewer than 5 starters have OPS data."""
+    import monitor
+
+    alert_sent = []
+    mon = _make_monitor_mocks(monkeypatch, pct_drop_actual=0.20, num_players_with_ops=3)
+    monkeypatch.setattr(mon, "send_lineup_alert", lambda *a, **kw: alert_sent.append(True) or True)
+
+    mon.run_lineup_monitor()
+    assert alert_sent == []
