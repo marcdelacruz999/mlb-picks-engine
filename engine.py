@@ -952,7 +952,7 @@ def run_results():
 
     # ── Collect and store post-game boxscore data ──
     print("\n[DATA] Collecting post-game boxscore data...")
-    from data_mlb import collect_boxscores
+    from data_mlb import collect_boxscores, collect_game_totals
     boxscore_data = collect_boxscores(grading_date)
     if boxscore_data["pitcher_logs"] or boxscore_data["team_logs"]:
         db.store_boxscores(boxscore_data["pitcher_logs"], boxscore_data["team_logs"])
@@ -960,6 +960,12 @@ def run_results():
               f"{len(boxscore_data['team_logs'])} team logs.")
     else:
         print("[DATA] No boxscore data collected.")
+
+    # ── Collect and store game totals (O/U bias tracking) ──
+    totals = collect_game_totals(grading_date)
+    if totals:
+        db.store_game_totals(totals)
+        print(f"[DB] Stored {len(totals)} game total rows for O/U bias tracking.")
 
     # ── Collect and store per-batter boxscore data ──
     print("[DATA] Collecting per-batter boxscore data...")
@@ -1197,11 +1203,26 @@ def main():
         target = args[idx + 1] if idx + 1 < len(args) else date.today().isoformat()
         db.init_db()
         print(f"[DATA] Collecting boxscores for {target}...")
-        from data_mlb import collect_boxscores
+        from data_mlb import collect_boxscores, collect_game_totals
         boxscore_data = collect_boxscores(target)
         db.store_boxscores(boxscore_data["pitcher_logs"], boxscore_data["team_logs"])
         print(f"[DB] Stored {len(boxscore_data['pitcher_logs'])} pitcher lines, "
               f"{len(boxscore_data['team_logs'])} team logs for {target}.")
+        totals = collect_game_totals(target)
+        db.store_game_totals(totals)
+        print(f"[DB] Stored {len(totals)} game total rows for {target}.")
+        return
+
+    if "--backfill-totals" in args:
+        idx = args.index("--backfill-totals")
+        # Optional: --backfill-totals 2026-04-01 2026-04-15
+        start = args[idx + 1] if idx + 1 < len(args) and not args[idx + 1].startswith("--") else None
+        end = args[idx + 2] if start and idx + 2 < len(args) and not args[idx + 2].startswith("--") else None
+        db.init_db()
+        from data_mlb import backfill_game_totals
+        print(f"[DATA] Backfilling game totals ({start or 'season start'} → {end or 'yesterday'})...")
+        count = backfill_game_totals(start_date=start, end_date=end)
+        print(f"[DB] Backfill complete: {count} games stored.")
         return
 
     if "--results" in args:

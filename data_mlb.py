@@ -1385,3 +1385,125 @@ if __name__ == "__main__":
     for g in games[:3]:
         print(f"  {g['away_team_name']} @ {g['home_team_name']}")
         print(f"    Pitchers: {g['away_pitcher_name']} vs {g['home_pitcher_name']}")
+
+
+def collect_game_totals(game_date: str) -> list:
+    """
+    Fetch final scores for all completed games on game_date.
+    Returns a list of dicts ready for db.store_game_totals().
+
+    Uses /schedule?hydrate=linescore for scores; falls back to /game/{pk}/boxscore
+    if linescore data is missing. total_line is None for historical dates (The Odds
+    API doesn't provide historical lines on free tier).
+    """
+    from config import PARK_FACTORS
+    schedule_url = f"{MLB_BASE}/schedule?sportId=1&date={game_date}&gameType=R&hydrate=linescore"
+    try:
+        resp = requests.get(schedule_url, timeout=15)
+        resp.raise_for_status()
+        schedule = resp.json()
+    except Exception as e:
+        print(f"[DATA] collect_game_totals schedule error for {game_date}: {e}")
+        return []
+
+    records = []
+    for date_entry in schedule.get("dates", []):
+        for game in date_entry.get("games", []):
+            if game.get("status", {}).get("abstractGameState") != "Final":
+                continue
+
+            game_pk = game["gamePk"]
+            teams_info = game.get("teams", {})
+            away_info = teams_info.get("away", {}).get("team", {})
+            home_info = teams_info.get("home", {}).get("team", {})
+
+            away_team_id = away_info.get("id")
+            home_team_id = home_info.get("id")
+            away_abbr = away_info.get("abbreviation", "")
+            home_abbr = home_info.get("abbreviation", "")
+
+            # Scores from linescore hydration
+            linescore = game.get("linescore", {})
+            away_runs = linescore.get("teams", {}).get("away", {}).get("runs")
+            home_runs = linescore.get("teams", {}).get("home", {}).get("runs")
+
+            if away_runs is None or home_runs is None:
+                # Fall back to individual boxscore fetch
+                try:
+                    bs_url = f"{MLB_BASE}/game/{game_pk}/boxscore"
+                    bs_resp = requests.get(bs_url, timeout=15)
+                    bs_resp.raise_for_status()
+                    bs = bs_resp.json()
+                    away_runs = (bs.get("teams", {}).get("away", {})
+                                   .get("teamStats", {}).get("batting", {}).get("runs"))
+                    home_runs = (bs.get("teams", {}).get("home", {})
+                                   .get("teamStats", {}).get("batting", {}).get("runs"))
+                except Exception as e:
+                    print(f"[DATA] collect_game_totals boxscore fallback error {game_pk}: {e}")
+                    continue
+                time.sleep(0.2)
+
+            if away_runs is None or home_runs is None:
+                continue
+
+            total_runs = away_runs + home_runs
+            park_factor = PARK_FACTORS.get(home_abbr, 1.00)
+
+            records.append({
+                "mlb_game_id": game_pk,
+                "game_date": game_date,
+                "home_team_id": home_team_id,
+                "away_team_id": away_team_id,
+                "home_team_abbr": home_abbr,
+                "away_team_abbr": away_abbr,
+                "home_runs": int(home_runs),
+                "away_runs": int(away_runs),
+                "total_runs": int(total_runs),
+                "total_line": None,
+                "ou_result": None,
+                "model_projected_total": None,
+                "home_sp_id": None,
+                "away_sp_id": None,
+                "home_sp_era": None,
+                "away_sp_era": None,
+                "park_factor": park_factor,
+                "temp_f": None,
+                "wind_mph": None,
+                "wind_dir": None,
+            })
+
+    print(f"[DATA] collect_game_totals {game_date}: {len(records)} final games")
+    return records
+
+
+def backfill_game_totals(start_date: str = None, end_date: str = None) -> int:
+    """
+    Backfill game_totals for every day from start_date through end_date (inclusive).
+    Defaults: start_date = Apr 1 of current season year, end_date = yesterday.
+    Safe to re-run — INSERT OR IGNORE skips already-stored rows.
+    Returns count of games stored.
+    """
+    from datetime import date as _date, timedelta
+    from config import SEASON_YEAR
+
+    if start_date is None:
+        start_date = f"{SEASON_YEAR}-04-01"
+    if end_date is None:
+        end_date = (_date.today() - timedelta(days=1)).isoformat()
+
+    start = _date.fromisoformat(start_date)
+    end = _date.fromisoformat(end_date)
+
+    total = 0
+    current = start
+    while current <= end:
+        ds = current.isoformat()
+        records = collect_game_totals(ds)
+        if records:
+            db.store_game_totals(records)
+            total += len(records)
+        current += timedelta(days=1)
+        time.sleep(0.3)
+
+    print(f"[DATA] backfill_game_totals: {total} games stored ({start_date} to {end_date})")
+    return total

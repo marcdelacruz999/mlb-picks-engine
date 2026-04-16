@@ -327,6 +327,32 @@ def init_db():
         updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS game_totals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mlb_game_id INTEGER NOT NULL,
+        game_date TEXT NOT NULL,
+        home_team_id INTEGER,
+        away_team_id INTEGER,
+        home_team_abbr TEXT,
+        away_team_abbr TEXT,
+        home_runs INTEGER,
+        away_runs INTEGER,
+        total_runs INTEGER,
+        total_line REAL,
+        ou_result TEXT,
+        model_projected_total REAL,
+        home_sp_id INTEGER,
+        away_sp_id INTEGER,
+        home_sp_era REAL,
+        away_sp_era REAL,
+        park_factor REAL,
+        temp_f REAL,
+        wind_mph REAL,
+        wind_dir TEXT,
+        created_at TEXT,
+        UNIQUE(mlb_game_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_analysis_log_date ON analysis_log(game_date);
     CREATE INDEX IF NOT EXISTS idx_analysis_log_game ON analysis_log(mlb_game_id);
     CREATE INDEX IF NOT EXISTS idx_games_date ON games(game_date);
@@ -1515,3 +1541,97 @@ def save_lineup_alert(mlb_game_id: int, game_date: str, ops_actual: float, ops_e
     )
     conn.commit()
     conn.close()
+
+
+def store_game_totals(records: list) -> None:
+    """
+    Upsert game_totals rows. Each record is a dict with keys:
+      mlb_game_id, game_date, home_team_id, away_team_id, home_team_abbr, away_team_abbr,
+      home_runs, away_runs, total_runs, total_line (nullable), ou_result,
+      model_projected_total (nullable), home_sp_id, away_sp_id,
+      home_sp_era (nullable), away_sp_era (nullable),
+      park_factor (nullable), temp_f (nullable), wind_mph (nullable), wind_dir (nullable)
+
+    Uses INSERT OR IGNORE — existing rows are not overwritten (opening-line-style preservation).
+    Call store_game_totals_update() to patch in model_projected_total after analysis runs.
+    """
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    for r in records:
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO game_totals
+                (mlb_game_id, game_date, home_team_id, away_team_id,
+                 home_team_abbr, away_team_abbr,
+                 home_runs, away_runs, total_runs,
+                 total_line, ou_result,
+                 model_projected_total,
+                 home_sp_id, away_sp_id, home_sp_era, away_sp_era,
+                 park_factor, temp_f, wind_mph, wind_dir, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                r["mlb_game_id"], r["game_date"],
+                r.get("home_team_id"), r.get("away_team_id"),
+                r.get("home_team_abbr"), r.get("away_team_abbr"),
+                r.get("home_runs"), r.get("away_runs"), r.get("total_runs"),
+                r.get("total_line"), r.get("ou_result"),
+                r.get("model_projected_total"),
+                r.get("home_sp_id"), r.get("away_sp_id"),
+                r.get("home_sp_era"), r.get("away_sp_era"),
+                r.get("park_factor"), r.get("temp_f"),
+                r.get("wind_mph"), r.get("wind_dir"),
+                now,
+            ))
+        except sqlite3.DatabaseError as e:
+            print(f"[DB] store_game_totals error game {r.get('mlb_game_id')}: {e}")
+    conn.commit()
+    conn.close()
+
+
+def get_game_totals_for_bias(days: int = 90) -> list:
+    """
+    Return game_totals rows that have both actual runs and a model projection,
+    for O/U bias analysis. Ordered oldest-first.
+    """
+    from datetime import timedelta
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT mlb_game_id, game_date, home_team_abbr, away_team_abbr,
+               home_runs, away_runs, total_runs,
+               total_line, ou_result,
+               model_projected_total,
+               home_sp_era, away_sp_era,
+               park_factor, temp_f, wind_mph, wind_dir
+        FROM game_totals
+        WHERE game_date >= ?
+          AND total_runs IS NOT NULL
+          AND model_projected_total IS NOT NULL
+        ORDER BY game_date ASC
+    """, (cutoff,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_game_totals_all(days: int = 90) -> list:
+    """
+    Return all game_totals rows (including those without model projection),
+    for O/U result analysis by park/weather/SP tier.
+    """
+    from datetime import timedelta
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT mlb_game_id, game_date, home_team_abbr, away_team_abbr,
+               home_runs, away_runs, total_runs,
+               total_line, ou_result,
+               model_projected_total,
+               home_sp_era, away_sp_era,
+               park_factor, temp_f, wind_mph, wind_dir
+        FROM game_totals
+        WHERE game_date >= ?
+          AND total_runs IS NOT NULL
+        ORDER BY game_date ASC
+    """, (cutoff,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

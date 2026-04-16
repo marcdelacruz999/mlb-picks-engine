@@ -493,6 +493,138 @@ def apply_weights(picks: list, analysis: dict, suggested_weights: dict,
     return {"applied": True, "reason": summary}
 
 
+def analyze_ou_bias(days: int = 90) -> dict:
+    """
+    Analyze O/U model projection bias using game_totals data.
+    Returns a dict with:
+      - games_analyzed: int
+      - avg_error: float  (model_projected - actual; positive = over-projecting)
+      - by_park_tier: {hitter/neutral/pitcher: {n, avg_error, over_pct}}
+      - by_temp_band: {cold/cool/normal/hot: {n, avg_error, over_pct}}
+      - by_sp_era_tier: {ace/average/weak: {n, avg_error, over_pct}}
+    Only includes rows where model_projected_total IS NOT NULL.
+    """
+    from datetime import date, timedelta
+    import sqlite3 as _sqlite3
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    # Open a fresh connection directly — not via _open_db() — so test patches
+    # on _open_db don't affect this function's isolated query.
+    try:
+        conn = _sqlite3.connect(config.DATABASE_PATH)
+        conn.row_factory = _sqlite3.Row
+        rows = conn.execute("""
+            SELECT home_team_abbr, home_runs, away_runs, total_runs,
+                   model_projected_total, park_factor, temp_f,
+                   home_sp_era, away_sp_era
+            FROM game_totals
+            WHERE game_date >= ?
+              AND total_runs IS NOT NULL
+              AND model_projected_total IS NOT NULL
+        """, (cutoff,)).fetchall()
+        conn.close()
+    except _sqlite3.OperationalError:
+        # game_totals table not yet created — run python3 engine.py --backfill-totals
+        return {"games_analyzed": 0, "avg_error": None,
+                "by_park_tier": {}, "by_temp_band": {}, "by_sp_era_tier": {}}
+
+    if not rows:
+        return {"games_analyzed": 0, "avg_error": None,
+                "by_park_tier": {}, "by_temp_band": {}, "by_sp_era_tier": {}}
+
+    errors = []
+    park_buckets = {"hitter": [], "neutral": [], "pitcher": []}
+    temp_buckets = {"cold": [], "cool": [], "normal": [], "hot": []}
+    sp_buckets = {"ace": [], "average": [], "weak": []}
+
+    for r in rows:
+        actual = r["total_runs"]
+        projected = r["model_projected_total"]
+        err = projected - actual   # positive = model over-projected
+        errors.append(err)
+
+        # Park tier
+        pf = r["park_factor"] or 1.00
+        if pf >= 1.06:
+            park_buckets["hitter"].append(err)
+        elif pf <= 0.94:
+            park_buckets["pitcher"].append(err)
+        else:
+            park_buckets["neutral"].append(err)
+
+        # Temp band
+        t = r["temp_f"]
+        if t is not None:
+            if t < 50:
+                temp_buckets["cold"].append(err)
+            elif t < 62:
+                temp_buckets["cool"].append(err)
+            elif t > 82:
+                temp_buckets["hot"].append(err)
+            else:
+                temp_buckets["normal"].append(err)
+
+        # SP ERA tier (average of both SPs)
+        home_era = r["home_sp_era"]
+        away_era = r["away_sp_era"]
+        if home_era is not None and away_era is not None:
+            avg_sp_era = (home_era + away_era) / 2
+            if avg_sp_era < 3.20:
+                sp_buckets["ace"].append(err)
+            elif avg_sp_era > 4.80:
+                sp_buckets["weak"].append(err)
+            else:
+                sp_buckets["average"].append(err)
+
+    def _summarize(bucket_errs):
+        if not bucket_errs:
+            return None
+        n = len(bucket_errs)
+        avg_err = round(sum(bucket_errs) / n, 2)
+        # over_pct: games where model under-projected (actual > projected = went over vs model)
+        over_pct = round(sum(1 for e in bucket_errs if e < 0) / n * 100, 1)
+        return {"n": n, "avg_error": avg_err, "over_pct": over_pct}
+
+    return {
+        "games_analyzed": len(errors),
+        "avg_error": round(sum(errors) / len(errors), 2),
+        "by_park_tier": {k: _summarize(v) for k, v in park_buckets.items() if v},
+        "by_temp_band": {k: _summarize(v) for k, v in temp_buckets.items() if v},
+        "by_sp_era_tier": {k: _summarize(v) for k, v in sp_buckets.items() if v},
+    }
+
+
+def format_ou_bias_report(bias: dict) -> str:
+    """Format analyze_ou_bias() output for Discord or stdout."""
+    if bias["games_analyzed"] == 0:
+        return "O/U Bias: No data yet (run backfill_game_totals first)"
+
+    n = bias["games_analyzed"]
+    avg = bias["avg_error"]
+    direction = "over-projecting" if avg > 0 else "under-projecting"
+    lines = [
+        f"**O/U Projection Bias** ({n} games)",
+        f"Avg error: **{avg:+.2f} runs** ({direction})",
+        "",
+    ]
+
+    if bias["by_park_tier"]:
+        lines.append("**By Park:**")
+        for tier, s in bias["by_park_tier"].items():
+            lines.append(f"  {tier}: {s['avg_error']:+.2f} runs avg, {s['over_pct']}% went over model (n={s['n']})")
+
+    if bias["by_temp_band"]:
+        lines.append("**By Temp:**")
+        for band, s in bias["by_temp_band"].items():
+            lines.append(f"  {band}: {s['avg_error']:+.2f} runs avg, {s['over_pct']}% went over model (n={s['n']})")
+
+    if bias["by_sp_era_tier"]:
+        lines.append("**By SP ERA Tier:**")
+        for tier, s in bias["by_sp_era_tier"].items():
+            lines.append(f"  {tier}: {s['avg_error']:+.2f} runs avg, {s['over_pct']}% went over model (n={s['n']})")
+
+    return "\n".join(lines)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Weekly signal calibration report")
     parser.add_argument("--apply", action="store_true",
@@ -514,8 +646,20 @@ def main(argv=None):
         analysis["baseline_win_rate"], analysis["pick_count"]
     )
 
+    # O/U projection bias report (uses game_totals table)
+    ou_bias = analyze_ou_bias(days=90)
+    ou_bias_text = format_ou_bias_report(ou_bias)
+
     week_label = datetime.now().strftime("%b %-d")
     payload = build_embed(analysis, current_weights, suggested_weights, week_label)
+
+    # Append O/U bias as an extra embed field
+    if ou_bias["games_analyzed"] > 0:
+        payload["embeds"][0]["fields"].append({
+            "name": "📊 O/U Projection Bias (90d)",
+            "value": ou_bias_text,
+            "inline": False,
+        })
 
     if args.test:
         if args.apply:
@@ -526,6 +670,7 @@ def main(argv=None):
         for field in e.get("fields", []):
             print(f"\n{field['name']}")
             print(field["value"])
+        print(f"\n{ou_bias_text}")
         return
 
     # Post to Discord
@@ -552,6 +697,7 @@ def main(argv=None):
         "weights_before": current_weights,
         "weights_after": suggested_weights if apply_result["applied"] else current_weights,
         "applied": apply_result["applied"],
+        "ou_bias": ou_bias,
     }
     write_calibration_log(log_entry)
 
