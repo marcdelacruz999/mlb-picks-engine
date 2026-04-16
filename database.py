@@ -1728,3 +1728,24 @@ def backfill_game_totals_abbr() -> int:
     ).fetchone()
     conn.close()
     return row[0] if row else 0
+
+
+def update_game_total_weather(mlb_game_id: int, temp_f, wind_mph, wind_dir) -> None:
+    """Update weather fields for a single game_totals row."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE game_totals SET temp_f=?, wind_mph=?, wind_dir=? WHERE mlb_game_id=?",
+        (temp_f, wind_mph, wind_dir, mlb_game_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_game_totals_missing_weather():
+    """Return list of (mlb_game_id, game_date) for rows where temp_f IS NULL."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT mlb_game_id, game_date FROM game_totals WHERE temp_f IS NULL ORDER BY game_date"
+    ).fetchall()
+    conn.close()
+    return rows
