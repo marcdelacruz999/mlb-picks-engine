@@ -595,6 +595,17 @@ def get_today_analysis_log() -> list:
     return [dict(r) for r in rows]
 
 
+def get_analysis_log_for_date(target_date: str) -> list:
+    """Return all analysis_log entries for a given date string (YYYY-MM-DD)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM analysis_log WHERE game_date=? ORDER BY ml_confidence DESC",
+        (target_date,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
 def update_analysis_log_result(log_id: int, ml_status: str, ou_status: str,
                                 actual_away: int, actual_home: int, actual_total: int):
     """Grade an analysis_log entry with final score."""

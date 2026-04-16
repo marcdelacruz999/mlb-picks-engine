@@ -1099,6 +1099,67 @@ def _print_snapshot():
           f"({model_summary['ou_accuracy']}% accuracy)  [{model_summary['ou_total']} games]")
 
 
+def run_report(target_date: Optional[str] = None) -> None:
+    """
+    Re-send the nightly report for a given date (default: today).
+    Queries graded analysis_log and sent picks from the DB.
+    """
+    db.init_db()
+    grade_date = target_date or date.today().isoformat()
+    conn = db.get_connection()
+
+    log_entries = db.get_analysis_log_for_date(grade_date)
+    if not log_entries:
+        print(f"[REPORT] No analysis log entries for {grade_date}.")
+        return
+
+    picks = db.get_picks_for_date(grade_date)
+
+    # Build sent_picks_by_game
+    sent_picks_by_game = {}
+    for p in picks:
+        gid = p["game_id"]
+        if gid not in sent_picks_by_game:
+            sent_picks_by_game[gid] = []
+        sent_picks_by_game[gid].append(p)
+
+    # Build mlb_to_local
+    mlb_to_local = {}
+    for p in picks:
+        game_row = conn.execute(
+            "SELECT id, mlb_game_id FROM games WHERE id=?", (p["game_id"],)
+        ).fetchone()
+        if game_row:
+            mlb_to_local[game_row["mlb_game_id"]] = game_row["id"]
+    for entry in log_entries:
+        mid = entry.get("mlb_game_id")
+        if mid and mid not in mlb_to_local:
+            game_row = conn.execute(
+                "SELECT id FROM games WHERE mlb_game_id=?", (mid,)
+            ).fetchone()
+            if game_row:
+                mlb_to_local[mid] = game_row["id"]
+
+    # Compute summary stats from graded entries
+    wins = sum(1 for p in picks if p.get("status") == "won")
+    losses = sum(1 for p in picks if p.get("status") == "lost")
+    pushes = sum(1 for p in picks if p.get("status") == "push")
+    roi = round((wins - losses) / max(wins + losses, 1) * 100, 1)
+    ml_correct = sum(1 for e in log_entries if e.get("ml_status") == "correct")
+    ml_incorrect = sum(1 for e in log_entries if e.get("ml_status") == "incorrect")
+    ou_correct = sum(1 for e in log_entries if e.get("ou_status") == "correct")
+    ou_incorrect = sum(1 for e in log_entries if e.get("ou_status") == "incorrect")
+
+    results = {
+        "wins": wins, "losses": losses, "pushes": pushes, "roi": roi,
+        "ml_correct": ml_correct, "ml_incorrect": ml_incorrect,
+        "ou_correct": ou_correct, "ou_incorrect": ou_incorrect,
+        "pick_lines": [],
+    }
+
+    send_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local)
+
+
 def main():
     args = sys.argv[1:]
 
@@ -1116,6 +1177,10 @@ def main():
 
     if "--results" in args:
         run_results()
+    elif "--report" in args:
+        idx = args.index("--report")
+        target = args[idx + 1] if idx + 1 < len(args) and not args[idx + 1].startswith("--") else None
+        run_report(target)
     elif "--refresh" in args:
         run_refresh()
     elif "--status" in args:

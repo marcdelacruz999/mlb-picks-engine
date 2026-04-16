@@ -29,6 +29,8 @@ python3 engine.py --results    # Grade today's picks after games finish
 python3 engine.py --status     # Print 30-day tracking snapshot
 python3 engine.py --game X     # 7-agent analysis of game(s) matching team X (bypasses threshold)
 python3 engine.py --collect DATE  # Collect post-game boxscores for DATE (YYYY-MM-DD)
+python3 engine.py --report          # Re-send nightly report for today (already graded)
+python3 engine.py --report DATE     # Re-send nightly report for DATE (YYYY-MM-DD)
 ```
 
 ---
