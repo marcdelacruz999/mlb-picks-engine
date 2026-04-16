@@ -43,6 +43,8 @@ OU_CONVICTION_GAP = 1.5     # projected total must differ from line by ≥ this 
 
 # Batter data pipeline thresholds
 MIN_BATTER_GAMES = 8            # min games in batter_game_logs to use rolling OPS
+LINEUP_OPS_DROP_THRESHOLD = 0.10     # alert when pick team's confirmed lineup OPS is this much below expected
+LINEUP_MIN_PLAYERS_WITH_DATA = 5     # skip alert if fewer than this many starters have OPS data
 OU_K_RATE_THRESHOLD_HIGH = 0.260  # combined K/PA >= this nudges under confidence +0.5
 OU_K_RATE_THRESHOLD_LOW  = 0.190  # combined K/PA <= this nudges over confidence +0.5
 
