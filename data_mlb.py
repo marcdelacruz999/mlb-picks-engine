@@ -1419,8 +1419,8 @@ def collect_game_totals(game_date: str) -> list:
 
             away_team_id = away_info.get("id")
             home_team_id = home_info.get("id")
-            away_abbr = away_info.get("abbreviation", "")
-            home_abbr = home_info.get("abbreviation", "")
+            away_abbr = db.get_team_abbr_by_mlb_id(away_team_id) if away_team_id else ""
+            home_abbr = db.get_team_abbr_by_mlb_id(home_team_id) if home_team_id else ""
 
             # Scores from linescore hydration
             linescore = game.get("linescore", {})
