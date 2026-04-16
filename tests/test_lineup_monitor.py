@@ -89,3 +89,113 @@ def test_get_current_lineups_not_confirmed(monkeypatch):
     assert result["home_ids"] == []
     assert result["away_confirmed"] is False
     assert result["home_confirmed"] is False
+
+
+def test_run_lineup_monitor_no_alert_when_already_sent(monkeypatch):
+    """No alert fired when lineup_alert_already_sent returns True."""
+    import monitor
+    import database as db
+
+    monkeypatch.setattr(db, "get_today_picks", lambda: [
+        {"game_id": 1, "status": "pending", "pick_team": "Houston Astros"}
+    ])
+    monkeypatch.setattr(db, "get_today_analysis_log", lambda: [
+        {"mlb_game_id": 745444, "away_team": "Colorado Rockies", "home_team": "Houston Astros",
+         "ml_pick_team": "Houston Astros", "game": "COL @ HOU"}
+    ])
+
+    monkeypatch.setattr(db, "lineup_alert_already_sent", lambda gid, d: True)
+
+    import data_mlb
+    api_called = []
+    monkeypatch.setattr(data_mlb, "get_current_lineups", lambda gid: api_called.append(gid) or {})
+
+    class FakeConn:
+        def execute(self, q, params=None):
+            class R:
+                def fetchone(self):
+                    return {"mlb_game_id": 745444, "away_team_id": 10, "home_team_id": 20}
+            return R()
+        def close(self): pass
+
+    monkeypatch.setattr(db, "get_connection", lambda: FakeConn())
+
+    monitor.run_lineup_monitor()
+    assert api_called == []  # get_current_lineups should NOT be called
+
+
+def test_run_lineup_monitor_skips_game_in_progress(monkeypatch):
+    """No alert fired when game is Live."""
+    import monitor, database as db, data_mlb
+
+    monkeypatch.setattr(db, "get_today_picks", lambda: [
+        {"game_id": 1, "status": "pending", "pick_team": "Houston Astros"}
+    ])
+    monkeypatch.setattr(db, "get_today_analysis_log", lambda: [
+        {"mlb_game_id": 745444, "away_team": "Colorado Rockies", "home_team": "Houston Astros",
+         "ml_pick_team": "Houston Astros", "game": "COL @ HOU"}
+    ])
+    monkeypatch.setattr(db, "lineup_alert_already_sent", lambda gid, d: False)
+
+    class FakeConn:
+        def execute(self, q, params=None):
+            class R:
+                def fetchone(self):
+                    if "games" in q:
+                        return {"mlb_game_id": 745444, "away_team_id": 10, "home_team_id": 20}
+                    return {"mlb_id": 117}
+            return R()
+        def close(self): pass
+
+    monkeypatch.setattr(db, "get_connection", lambda: FakeConn())
+
+    monkeypatch.setattr(data_mlb, "get_current_lineups", lambda gid: {
+        "away_ids": [1, 2, 3, 4, 5, 6, 7, 8, 9],
+        "home_ids": [11, 12, 13, 14, 15, 16, 17, 18, 19],
+        "away_confirmed": True,
+        "home_confirmed": True,
+        "game_status": "Live",
+    })
+
+    alert_sent = []
+    monkeypatch.setattr(monitor, "send_lineup_alert", lambda *a, **kw: alert_sent.append(True))
+
+    monitor.run_lineup_monitor()
+    assert alert_sent == []
+
+
+def test_run_lineup_monitor_skips_lineups_not_posted(monkeypatch):
+    """No alert when lineups not yet confirmed."""
+    import monitor, database as db, data_mlb
+
+    monkeypatch.setattr(db, "get_today_picks", lambda: [
+        {"game_id": 1, "status": "pending", "pick_team": "Houston Astros"}
+    ])
+    monkeypatch.setattr(db, "get_today_analysis_log", lambda: [
+        {"mlb_game_id": 745444, "away_team": "Colorado Rockies", "home_team": "Houston Astros",
+         "ml_pick_team": "Houston Astros", "game": "COL @ HOU"}
+    ])
+    monkeypatch.setattr(db, "lineup_alert_already_sent", lambda gid, d: False)
+
+    class FakeConn:
+        def execute(self, q, params=None):
+            class R:
+                def fetchone(self):
+                    if "games" in q:
+                        return {"mlb_game_id": 745444, "away_team_id": 10, "home_team_id": 20}
+                    return {"mlb_id": 117}
+            return R()
+        def close(self): pass
+
+    monkeypatch.setattr(db, "get_connection", lambda: FakeConn())
+
+    monkeypatch.setattr(data_mlb, "get_current_lineups", lambda gid: {
+        "away_ids": [], "home_ids": [],
+        "away_confirmed": False, "home_confirmed": False, "game_status": "Preview",
+    })
+
+    alert_sent = []
+    monkeypatch.setattr(monitor, "send_lineup_alert", lambda *a, **kw: alert_sent.append(True))
+
+    monitor.run_lineup_monitor()
+    assert alert_sent == []
