@@ -179,7 +179,7 @@ def test_backfill_game_totals_weather_updates_null_rows(tmp_path, monkeypatch):
     }
 
     with patch("data_mlb.requests.get", return_value=mock_sched_resp), \
-         patch("data_mlb.fetch_venue_weather", return_value={"temp_f": 65.0, "wind_mph": 7.0, "wind_dir": "NE"}):
+         patch("data_mlb.fetch_venue_weather_archive", return_value={"temp_f": 65.0, "wind_mph": 7.0, "wind_dir": "NE"}):
         import data_mlb
         count = data_mlb.backfill_game_totals_weather()
 
@@ -212,7 +212,7 @@ def test_backfill_game_totals_weather_skips_populated_rows(tmp_path, monkeypatch
     conn.close()
 
     with patch("data_mlb.requests.get") as mock_get, \
-         patch("data_mlb.fetch_venue_weather") as mock_weather:
+         patch("data_mlb.fetch_venue_weather_archive") as mock_weather:
         import data_mlb
         count = data_mlb.backfill_game_totals_weather()
 
@@ -242,7 +242,7 @@ def test_backfill_game_totals_weather_handles_api_failure(tmp_path, monkeypatch)
     mock_resp.json.return_value = {}
 
     with patch("data_mlb.requests.get", return_value=mock_resp), \
-         patch("data_mlb.fetch_venue_weather") as mock_weather:
+         patch("data_mlb.fetch_venue_weather_archive") as mock_weather:
         import data_mlb
         count = data_mlb.backfill_game_totals_weather()
 

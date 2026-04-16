@@ -1341,6 +1341,74 @@ def fetch_venue_weather(venue_id: int, game_date: str = None, game_time_utc: str
         return {}
 
 
+def fetch_venue_weather_archive(venue_id: int, game_date: str, game_time_utc: str = "") -> dict:
+    """
+    Fetch historical weather for an MLB venue using Open-Meteo /v1/archive.
+    Works for past dates only (yesterday and earlier).
+    Returns same dict shape as fetch_venue_weather().
+    """
+    from datetime import datetime
+    import zoneinfo
+
+    lat, lon = fetch_venue_coords(venue_id)
+    if lat is None or lon is None:
+        return {}
+
+    try:
+        url = (
+            "https://archive-api.open-meteo.com/v1/archive"
+            f"?latitude={lat}&longitude={lon}"
+            "&hourly=temperature_2m,precipitation_probability,weathercode,windspeed_10m,winddirection_10m"
+            "&temperature_unit=fahrenheit&windspeed_unit=mph"
+            f"&start_date={game_date}&end_date={game_date}"
+            "&timezone=auto"
+        )
+        resp = _api_get(url, f"fetch_venue_weather_archive(venue {venue_id})", timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        hourly = data.get("hourly", {})
+        times = hourly.get("time", [])
+
+        # Default to 7pm local (index 19) as game-time proxy
+        idx = min(19, len(times) - 1) if times else 0
+        forecast_for = "7:00 PM (estimated)"
+
+        if game_time_utc:
+            try:
+                game_dt_utc = datetime.fromisoformat(game_time_utc.replace("Z", "+00:00"))
+                tz_name = data.get("timezone", "America/New_York")
+                local_tz = zoneinfo.ZoneInfo(tz_name)
+                game_dt_local = game_dt_utc.astimezone(local_tz)
+                target_hour_str = game_dt_local.strftime("%Y-%m-%dT%H:00")
+                if target_hour_str in times:
+                    idx = times.index(target_hour_str)
+                    forecast_for = game_dt_local.strftime("%-I:%M %p %Z")
+            except Exception:
+                pass
+
+        temp_f = hourly.get("temperature_2m", [None])[idx] if times else None
+        precip = (hourly.get("precipitation_probability", [0])[idx] or 0) if times else 0
+        wind_mph = (hourly.get("windspeed_10m", [0])[idx] or 0) if times else 0
+        wind_dir = (hourly.get("winddirection_10m", [0])[idx] or 0) if times else 0
+        wcode = (hourly.get("weathercode", [0])[idx] or 0) if times else 0
+
+        return {
+            "temp_f": round(temp_f, 1) if temp_f is not None else None,
+            "wind_mph": round(wind_mph, 1),
+            "wind_dir": _wind_direction_label(wind_dir),
+            "wind_dir_deg": wind_dir,
+            "precip_chance": precip,
+            "conditions": _wmo_description(wcode),
+            "weathercode": wcode,
+            "forecast_for": forecast_for,
+        }
+    except _RETRY_ERRORS:
+        return {}
+    except Exception as e:
+        print(f"[WARNING] fetch_venue_weather_archive(venue {venue_id}, {game_date}): {e}")
+        return {}
+
+
 def _wmo_description(code: int) -> str:
     """Convert WMO weather code to human-readable string."""
     wmo = {
@@ -1544,7 +1612,7 @@ def backfill_game_totals_weather() -> int:
             if not venue_id:
                 continue
 
-            weather = fetch_venue_weather(venue_id, game_date, game_time_utc) or {}
+            weather = fetch_venue_weather_archive(venue_id, game_date, game_time_utc) or {}
             if weather.get("temp_f") is not None:
                 db.update_game_total_weather(
                     mlb_game_id,
