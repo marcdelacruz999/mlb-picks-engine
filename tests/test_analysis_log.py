@@ -128,6 +128,7 @@ def test_run_results_grades_analysis_log(tmp_db, monkeypatch):
     monkeypatch.setattr(db, "get_today_picks", lambda: [])
     monkeypatch.setattr(db, "collect_batter_boxscores", lambda d: 0)
     monkeypatch.setattr(engine, "_fetch_verified_score", lambda game_id: None)
+    monkeypatch.setattr(engine, "send_nightly_report", lambda *a, **kw: False)
 
     import data_mlb
     monkeypatch.setattr(data_mlb, "collect_boxscores", lambda d: {"pitcher_logs": [], "team_logs": []})

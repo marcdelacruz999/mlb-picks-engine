@@ -58,13 +58,13 @@ BULLPEN_ERA_RUST_THRESHOLD = 5.0  # cap confidence at 6 when picked SP has ≥8d
 # Decision Model Weights  (must sum to 1.0)
 # ──────────────────────────────────────────────
 WEIGHTS = {
-    "pitching":    0.23,   # was 0.25 — trimmed: rust-risk layoff SP + weak pen pattern caused both Apr 13-14 ML losses
-    "offense":     0.24,   # was 0.20 — bumped: 3W-0L when confirmed home lineup edge, strongest live signal
-    "bullpen":     0.18,   # was 0.17 — bumped: ERA quality matters more than stronger/weaker label alone
-    "advanced":    0.12,   # unchanged — need more data before moving
-    "momentum":    0.07,   # was 0.10 — trimmed: hard to measure, reallocated to offense+bullpen
-    "weather":     0.05,   # unchanged — not testable historically (neutral placeholder used)
-    "market":      0.11,   # unchanged — held constant (no historical odds data)
+    "pitching":    0.238,  # live signal rebalance 2026-04-16
+    "offense":    0.2441,  # live signal rebalance 2026-04-16
+    "bullpen":    0.185,  # live signal rebalance 2026-04-16
+    "advanced":    0.1191,  # live signal rebalance 2026-04-16
+    "momentum":    0.07,  # live signal rebalance 2026-04-16
+    "weather":    0.0338,  # live signal rebalance 2026-04-16
+    "market":    0.11,  # live signal rebalance 2026-04-16
 }
 
 # ──────────────────────────────────────────────
