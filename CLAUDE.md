@@ -10,7 +10,7 @@
 | Time | Command | What it does |
 |------|---------|--------------|
 | 8:00 AM–5:00 PM (hourly) | `engine.py` | Full re-analysis every hour — dedup blocks resends, lineup penalty (-1 conf) holds borderline picks until lineups confirm |
-| 11:00 PM | `engine.py --results` | Grades picks vs final scores; auto-runs `collect_boxscores()` |
+| 11:00 PM | `engine.py --results` | Grades picks vs final scores; collects boxscores, game totals, and batter logs |
 | Every 30 min | `monitor.py` | Pitcher scratch monitor — Discord alert on SP change |
 | 11:30 PM | `optimizer.py` | Nightly optimizer — analyzes data, implements one improvement (7-day code cooldown) |
 | Monday 9:00 AM | `calibrate.py` | Weekly signal calibration — posts Discord report; run with `--apply` to update weights |
@@ -28,7 +28,7 @@ python3 engine.py --refresh    # Re-validate sent picks, send updates
 python3 engine.py --results    # Grade today's picks after games finish
 python3 engine.py --status     # Print 30-day tracking snapshot
 python3 engine.py --game X     # 7-agent analysis of game(s) matching team X (bypasses threshold)
-python3 engine.py --collect DATE  # Collect post-game boxscores for DATE (YYYY-MM-DD)
+python3 engine.py --collect DATE  # Collect all post-game data for DATE: pitcher/team logs, game totals, batter logs
 python3 engine.py --report          # Re-send nightly report for today (already graded)
 python3 engine.py --report DATE     # Re-send nightly report for DATE (YYYY-MM-DD)
 ```
@@ -110,9 +110,9 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **SQLite date('now') is local time** — in tests, use `datetime.now().isoformat()` (not `datetime.utcnow()`) for `created_at` inserts, or queries filtering by `date('now')` will miss the row.
 
-**run_results() conn lifecycle** — `conn` is opened at line 609 and closed at line 746 after pick grading. The `mlb_to_local` build block (line 862+) reopens its own conn and closes it. Any new code after line 746 must call `db.get_connection()` fresh — do not reuse the closed conn.
+**run_results() conn lifecycle** — conn is closed after pick grading, then reopened for the mlb_to_local build. Any code added after the grading loop must call `db.get_connection()` fresh — do not reuse a closed conn.
 
-**--collect runs all three collectors** — `collect_boxscores` (pitcher/team logs), `collect_game_totals`, and `collect_batter_boxscores`. All three must be called together; missing any leaves gaps in batter hot/cold streaks and O/U bias tracking.
+**--collect runs all three collectors** — `collect_boxscores`, `collect_game_totals`, `collect_batter_boxscores`. Missing any leaves gaps in batter streaks and O/U bias tracking.
 
 ---
 
