@@ -104,7 +104,7 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **MLB /schedule linescore endpoint** — does NOT return `abbreviation` field, only `team_id`. Use `db.get_team_abbr_by_mlb_id(team_id)` to look up abbreviations from the `teams` table.
 
-**fetch_venue_weather() uses forecast API** — Open-Meteo `/v1/forecast` only returns reliable data for today + future dates. For historical game dates, use `/v1/archive`. `backfill_game_totals_weather()` in data_mlb.py exists but is only accurate for recent/future games.
+**fetch_venue_weather() uses forecast API** — Open-Meteo `/v1/forecast` only returns reliable data for today + future dates. For historical game dates, use `fetch_venue_weather_archive()` (uses `archive-api.open-meteo.com/v1/archive`). `backfill_game_totals_weather()` calls the archive variant and is safe for historical backfill.
 
 ---
 
