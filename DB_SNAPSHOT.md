@@ -1,4 +1,4 @@
-# DB Snapshot — 2026-04-16 01:45 AM
+# DB Snapshot — 2026-04-17 01:45 AM
 
 *Auto-generated nightly. Do not edit manually.*
 
@@ -7,6 +7,7 @@
 
 | Date | Type | Team | Conf | Edge | EV | Odds | Result |
 |------|------|------|------|------|----|------|--------|
+| 2026-04-16 | moneyline | Detroit Tigers | 7 | 0.207 | 0.188 | -100 | won |
 | 2026-04-15 | moneyline | Houston Astros | 7 | 0.230 | 0.0283 | -150 | won |
 | 2026-04-15 | moneyline | Tampa Bay Rays | 7 | 0.210 | 0.056 | -100 | won |
 | 2026-04-15 | moneyline | Atlanta Braves | 7 | 0.274 | 0.05 | -150 | won |
@@ -29,15 +30,15 @@
 
 ## ROI Summary (last 30 days)
 
-- Record: **16-3-0** (19 graded)
-- Win rate: **84.2%**
-- Net units: **+9.584**
+- Record: **17-3-0** (20 graded)
+- Win rate: **85.0%**
+- Net units: **+10.584**
 
 ## Win Rate by Pick Type (last 30 days)
 
 | Type | W | L | P | Win% |
 |------|---|---|---|------|
-| moneyline | 11 | 2 | 0 | 84.6% |
+| moneyline | 12 | 2 | 0 | 85.7% |
 | over | 5 | 0 | 0 | 100.0% |
 | under | 0 | 1 | 0 | 0.0% |
 
@@ -46,32 +47,32 @@
 | Conf | W | L | P | Win% |
 |------|---|---|---|------|
 | 8 | 3 | 0 | 0 | 100.0% |
-| 7 | 13 | 3 | 0 | 81.2% |
+| 7 | 14 | 3 | 0 | 82.4% |
 
 ## Model Accuracy — All Games (last 30 days)
 
-- ML model: 28/40 correct (70.0%)
-- O/U model: 10/17 correct (58.8%)
+- ML model: 33/50 correct (66.0%)
+- O/U model: 11/20 correct (55.0%)
 
 ## Rolling Data Coverage
 
-- pitcher_game_logs: **1684 rows**, last date: 2026-04-15
-- team_game_logs: **394 rows**, last date: 2026-04-15
+- pitcher_game_logs: **1778 rows**, last date: 2026-04-16
+- team_game_logs: **414 rows**, last date: 2026-04-16
 - Starters with ≥5 game logs (blend active): **1**
 
 ## Agent Score Averages (last 7 days, all logged games)
 
-*(over 40 game-logs)*
+*(over 50 game-logs)*
 
 | Agent | Avg Score |
 |-------|-----------|
-| Pitching | 0.056 |
-| Offense | 0.131 |
-| Bullpen | 0.079 |
-| Advanced | 0.1 |
+| Pitching | 0.039 |
+| Offense | 0.114 |
+| Bullpen | 0.065 |
+| Advanced | 0.113 |
 | Momentum | 0.019 |
-| Market | 0.046 |
-| Weather | -0.027 |
+| Market | 0.038 |
+| Weather | -0.025 |
 
 ## Scratch Alerts (last 7 days)
 
