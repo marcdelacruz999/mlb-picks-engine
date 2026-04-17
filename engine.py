@@ -1226,6 +1226,8 @@ def main():
         totals = collect_game_totals(target)
         db.store_game_totals(totals)
         print(f"[DB] Stored {len(totals)} game total rows for {target}.")
+        batter_inserted = db.collect_batter_boxscores(target)
+        print(f"[DB] Stored {batter_inserted} batter game log rows for {target}.")
         return
 
     if "--backfill-totals" in args:
