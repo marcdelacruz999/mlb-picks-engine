@@ -858,6 +858,7 @@ def run_results():
 
     # Build mlb_game_id -> local game_id map for nightly report
     mlb_to_local = {}
+    conn = db.get_connection()
     for p in picks:
         game_row = conn.execute(
             "SELECT id, mlb_game_id FROM games WHERE id=?", (p["game_id"],)
@@ -873,6 +874,7 @@ def run_results():
             ).fetchone()
             if game_row:
                 mlb_to_local[mid] = game_row["id"]
+    conn.close()
 
     all_games_lines = []
     for entry in sorted(log_entries, key=lambda e: e.get("away_team", "")):
