@@ -76,7 +76,7 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 ## Critical Rules
 
-**All thresholds in config.py** — never hardcode in analysis.py (optimizer reads config.py to tune values).
+**All thresholds in config.py** — never hardcode in analysis.py (optimizer reads config.py to tune values). Includes HOME_FIELD_ADVANTAGE and BULLPEN_ERA_RUST_THRESHOLD (moved Apr 16).
 
 **Python 3.9** — no `float | None` union syntax. Use `Optional[float]` or `"float | None"` string annotation. `zoneinfo` is stdlib (no pip install).
 
@@ -105,6 +105,10 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 **MLB /schedule linescore endpoint** — does NOT return `abbreviation` field, only `team_id`. Use `db.get_team_abbr_by_mlb_id(team_id)` to look up abbreviations from the `teams` table.
 
 **fetch_venue_weather() uses forecast API** — Open-Meteo `/v1/forecast` only returns reliable data for today + future dates. For historical game dates, use `fetch_venue_weather_archive()` (uses `archive-api.open-meteo.com/v1/archive`). `backfill_game_totals_weather()` calls the archive variant and is safe for historical backfill.
+
+**_parse_total_line() returns None on failure** — engine.py O/U grading pushes when total line can't be parsed or is out of range (5–15). Never returns 0.0. If adding new O/U grading paths, always guard: `if total_line is None: status = "push"`.
+
+**SQLite date('now') is local time** — in tests, use `datetime.now().isoformat()` (not `datetime.utcnow()`) for `created_at` inserts, or queries filtering by `date('now')` will miss the row.
 
 ---
 
