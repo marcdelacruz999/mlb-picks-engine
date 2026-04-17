@@ -427,7 +427,7 @@ def _format_nightly_report(
             conf_label = "ROUGH DAY"
             conf_left = "📉"
             conf_right = "😬"
-        lines.append(f"{conf_left} {wins}W-{losses}L · {conf_label} · ROI {roi_str} {conf_right}")
+        lines.append(f"{conf_left} **{wins}W-{losses}L · {conf_label} · ROI {roi_str}** {conf_right}")
     lines.append("")
 
     # ── Section 2: ML Board ──────────────────────────────────
@@ -499,7 +499,7 @@ def _format_nightly_report(
             ml_label = "COLD"
             ml_left = "📉"
             ml_right = "❄️"
-        lines.append(f"{ml_left} {ml_correct}W-{ml_incorrect}L · {ml_pct}% · {ml_label} {ml_right}")
+        lines.append(f"{ml_left} **{ml_correct}W-{ml_incorrect}L · {ml_pct}% · {ml_label}** {ml_right}")
     lines.append("")
 
     # ── Section 3: O/U Board ─────────────────────────────────
@@ -562,7 +562,7 @@ def _format_nightly_report(
                 ou_label = "TOTALS ROUGH"
                 ou_left = "📉"
                 ou_right = "😬"
-            lines.append(f"{ou_left} {ou_correct}W-{ou_incorrect}L · {ou_pct}% · {ou_label} {ou_right}")
+            lines.append(f"{ou_left} **{ou_correct}W-{ou_incorrect}L · {ou_pct}% · {ou_label}** {ou_right}")
 
     return "\n".join(lines)
 
