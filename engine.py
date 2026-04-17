@@ -479,16 +479,23 @@ def run_refresh():
             print(f"  👁  {w['game']} — {w['pick_team']} (conf {w['confidence']}/10)")
 
 
-def _parse_total_line(notes: str) -> float:
+def _parse_total_line(notes: str) -> Optional[float]:
     """Extract numeric total line from notes field.
     Handles formats like:
       'Total line: 8.5'
       'Total line: 8.5 | Lineups confirmed'
       'Total line: 8.5 | Lineup TBD — monitor before first pitch'
+    Returns None if not found or value is outside plausible range (5–15).
     """
     import re
-    match = re.search(r"Total line:\s*([\d.]+)", notes)
-    return float(match.group(1)) if match else 0.0
+    match = re.search(r"Total line:\s*([\d.]+)", notes or "")
+    if not match:
+        return None
+    val = float(match.group(1))
+    if not (5.0 <= val <= 15.0):
+        print(f"[WARNING] _parse_total_line: implausible total line {val} in notes: {notes!r}")
+        return None
+    return val
 
 
 def _fetch_verified_score(mlb_game_id: int) -> Optional[dict]:
@@ -661,7 +668,10 @@ def run_results():
 
         elif pick["pick_type"] == "over":
             total_line = _parse_total_line(pick.get("notes", ""))
-            if total_runs > total_line:
+            if total_line is None:
+                print(f"  ⚠️  Could not parse total line for pick {pick['id']} — grading as push")
+                status = "push"
+            elif total_runs > total_line:
                 status = "won"
             elif total_runs < total_line:
                 status = "lost"
@@ -670,7 +680,10 @@ def run_results():
 
         elif pick["pick_type"] == "under":
             total_line = _parse_total_line(pick.get("notes", ""))
-            if total_runs < total_line:
+            if total_line is None:
+                print(f"  ⚠️  Could not parse total line for pick {pick['id']} — grading as push")
+                status = "push"
+            elif total_runs < total_line:
                 status = "won"
             elif total_runs > total_line:
                 status = "lost"

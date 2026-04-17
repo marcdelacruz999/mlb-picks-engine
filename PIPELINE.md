@@ -273,7 +273,7 @@ Priority order:
    ✅ F5 picks
    ✅ Kelly criterion sizing
    ✅ Opponent-adjusted rolling ERA
-   🔲 API error handling & retry logic
+   ✅ API error handling & retry logic
    🔲 Correlated pick cap
    🔲 Pitcher velocity trends
 ```

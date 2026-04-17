@@ -232,11 +232,11 @@ def test_get_sent_pick_today_returns_dict_with_message_id(fresh_db):
     _db.init_db()
 
     conn = sqlite3.connect(fresh_db)
-    from datetime import datetime
-    now = datetime.utcnow().isoformat()
+    from datetime import date, datetime
+    now = datetime.now().isoformat()  # local time — matches date('now') in SQLite queries
     conn.execute(
         "INSERT INTO games (mlb_game_id, game_date, status) VALUES (?,?,?)",
-        (888, "2026-04-14", "scheduled")
+        (888, date.today().isoformat(), "scheduled")
     )
     conn.commit()
     game_id = conn.execute("SELECT id FROM games WHERE mlb_game_id=888").fetchone()[0]

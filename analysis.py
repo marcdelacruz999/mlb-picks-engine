@@ -5,7 +5,7 @@ Implements the weighted decision model with all 7 agents.
 Produces confidence scores, win probabilities, and pick recommendations.
 """
 
-from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP, F5_PITCHING_THRESHOLD, F5_BULLPEN_THRESHOLD
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP, F5_PITCHING_THRESHOLD, F5_BULLPEN_THRESHOLD, HOME_FIELD_ADVANTAGE, BULLPEN_ERA_RUST_THRESHOLD
 from data_odds import implied_probability, find_value
 from data_mlb import fetch_lineup_batting
 import database as _analysis_db
@@ -913,7 +913,6 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     # ── Convert to win probability ──
     # Composite in [-1, 1] → probability via sigmoid-like transform
     # 0.0 composite → 50% (with home-field bump to ~52%)
-    HOME_FIELD_ADVANTAGE = 0.04  # ~4% bump for home team
     base_prob = 0.50 + (composite * 0.35) + HOME_FIELD_ADVANTAGE
     home_win_prob = _clamp_prob(base_prob)
     away_win_prob = 1.0 - home_win_prob
@@ -1015,7 +1014,6 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
     # layoff (>=8d rust risk) AND (b) that team's bullpen ERA > 5.0.
     # The pitching agent scores the SP as an "advantage" even with the layoff flag,
     # but a rusty starter + bad pen = high blowup risk. Cap at 6 (below send threshold).
-    BULLPEN_ERA_RUST_THRESHOLD = 5.0
     _p_detail = pitching.get("detail", {})
     _b_detail = bullpen.get("detail", {})
     _home_rest = _p_detail.get("home_days_rest") or 0

@@ -49,6 +49,12 @@ OU_K_RATE_THRESHOLD_HIGH = 0.260  # combined K/PA >= this nudges under confidenc
 OU_K_RATE_THRESHOLD_LOW  = 0.190  # combined K/PA <= this nudges over confidence +0.5
 
 # ──────────────────────────────────────────────
+# Analysis Model Constants
+# ──────────────────────────────────────────────
+HOME_FIELD_ADVANTAGE = 0.04    # ~4% home-team win probability bump in composite→prob conversion
+BULLPEN_ERA_RUST_THRESHOLD = 5.0  # cap confidence at 6 when picked SP has ≥8d rest AND bullpen ERA > this
+
+# ──────────────────────────────────────────────
 # Decision Model Weights  (must sum to 1.0)
 # ──────────────────────────────────────────────
 WEIGHTS = {
