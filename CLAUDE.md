@@ -110,6 +110,8 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **SQLite date('now') is local time** — in tests, use `datetime.now().isoformat()` (not `datetime.utcnow()`) for `created_at` inserts, or queries filtering by `date('now')` will miss the row.
 
+**run_results() conn lifecycle** — `conn` is opened at line 609 and closed at line 746 after pick grading. The `mlb_to_local` build block (line 862+) reopens its own conn and closes it. Any new code after line 746 must call `db.get_connection()` fresh — do not reuse the closed conn.
+
 ---
 
 ## Reference Docs
