@@ -112,6 +112,8 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **run_results() conn lifecycle** — `conn` is opened at line 609 and closed at line 746 after pick grading. The `mlb_to_local` build block (line 862+) reopens its own conn and closes it. Any new code after line 746 must call `db.get_connection()` fresh — do not reuse the closed conn.
 
+**--collect runs all three collectors** — `collect_boxscores` (pitcher/team logs), `collect_game_totals`, and `collect_batter_boxscores`. All three must be called together; missing any leaves gaps in batter hot/cold streaks and O/U bias tracking.
+
 ---
 
 ## Reference Docs
