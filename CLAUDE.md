@@ -9,10 +9,11 @@
 
 | Time | Command | What it does |
 |------|---------|--------------|
-| 8:00 AM–5:00 PM (hourly) | `engine.py` | Full re-analysis every hour — dedup blocks resends, lineup penalty (-1 conf) holds borderline picks until lineups confirm |
-| 11:00 PM | `engine.py --results` | Grades picks vs final scores; collects boxscores, game totals, and batter logs |
+| 8:00 AM–5:00 PM (hourly) | `engine.py` | Full re-analysis every hour — 10 separate plists (run-8 through run-17); dedup blocks resends, lineup penalty (-1 conf) holds borderline picks until lineups confirm |
 | Every 30 min | `monitor.py` | Pitcher scratch monitor — Discord alert on SP change |
+| 11:00 PM | `engine.py --results` | Grades picks vs final scores; collects boxscores, game totals, and batter logs |
 | 11:30 PM | `optimizer.py` | Nightly optimizer — analyzes data, implements one improvement (7-day code cooldown) |
+| 1:45 AM | `export_db_snapshot.py` | Exports DB state to `DB_SNAPSHOT.md`, commits + pushes to GitHub so remote CEO agent has live context before it fires at 2:00 AM |
 | Monday 9:00 AM | `calibrate.py` | Weekly signal calibration — posts Discord report; run with `--apply` to update weights |
 
 Plists at `~/Library/LaunchAgents/com.marc.mlb-picks-engine.*.plist`. Output logged to `engine.log`.
