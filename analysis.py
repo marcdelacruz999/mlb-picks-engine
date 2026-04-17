@@ -108,12 +108,14 @@ def score_pitching(game: dict) -> dict:
     score = _clamp(score)
 
     # Determine narrative
+    home_name = home_p.get("name") or game.get("home_pitcher_name") or "?"
+    away_name = away_p.get("name") or game.get("away_pitcher_name") or "?"
     if score > 0.15:
-        edge = f"Home SP ({home_p.get('name','?')}, {home_throws}HP) has clear pitching advantage"
+        edge = f"Home SP ({home_name}, {home_throws}HP) has clear pitching advantage"
     elif score < -0.15:
-        edge = f"Away SP ({away_p.get('name','?')}, {away_throws}HP) has clear pitching advantage"
+        edge = f"Away SP ({away_name}, {away_throws}HP) has clear pitching advantage"
     else:
-        edge = f"Pitching matchup even ({home_p.get('name','?')} {home_throws}HP vs {away_p.get('name','?')} {away_throws}HP)"
+        edge = f"Pitching matchup even ({home_name} {home_throws}HP vs {away_name} {away_throws}HP)"
 
     if handedness_notes:
         edge += f" | {handedness_notes[0]}"
@@ -1032,6 +1034,14 @@ def analyze_game(game: dict, odds_data: dict = None) -> dict:
         "home_team": game.get("home_team_name", "?"),
         "away_pitcher": game.get("away_pitcher_name", "TBD"),
         "home_pitcher": game.get("home_pitcher_name", "TBD"),
+        "away_pitcher_era": _safe(game.get("away_pitcher_stats", {}).get("era")),
+        "home_pitcher_era": _safe(game.get("home_pitcher_stats", {}).get("era")),
+        "away_pitcher_wins": game.get("away_pitcher_stats", {}).get("wins"),
+        "away_pitcher_losses": game.get("away_pitcher_stats", {}).get("losses"),
+        "home_pitcher_wins": game.get("home_pitcher_stats", {}).get("wins"),
+        "home_pitcher_losses": game.get("home_pitcher_stats", {}).get("losses"),
+        "away_pitcher_throws": game.get("away_pitcher_stats", {}).get("throws", "R"),
+        "home_pitcher_throws": game.get("home_pitcher_stats", {}).get("throws", "R"),
         "mlb_game_id": game.get("mlb_game_id"),
         "game_time_utc": game.get("game_time_utc", ""),
         "status": game.get("status", "Scheduled"),
@@ -1499,6 +1509,16 @@ def risk_filter(analyses: list) -> list:
                     "ml_odds": pick_ml_odds,
                     "ev_score": ev,
                     "kelly_fraction": kelly_stake(a["ml_win_probability"], pick_ml_odds),
+                    "away_pitcher": a.get("away_pitcher", "TBD"),
+                    "home_pitcher": a.get("home_pitcher", "TBD"),
+                    "away_pitcher_era": a.get("away_pitcher_era"),
+                    "home_pitcher_era": a.get("home_pitcher_era"),
+                    "away_pitcher_wins": a.get("away_pitcher_wins"),
+                    "away_pitcher_losses": a.get("away_pitcher_losses"),
+                    "home_pitcher_wins": a.get("home_pitcher_wins"),
+                    "home_pitcher_losses": a.get("home_pitcher_losses"),
+                    "away_pitcher_throws": a.get("away_pitcher_throws", "R"),
+                    "home_pitcher_throws": a.get("home_pitcher_throws", "R"),
                 }
                 approved.append(pick_dict)
 
@@ -1556,6 +1576,16 @@ def risk_filter(analyses: list) -> list:
                     "ou_odds": ou_odds,
                     "ev_score": ev_ou,
                     "kelly_fraction": kelly_stake(ou_win_prob, ou_odds),
+                    "away_pitcher": a.get("away_pitcher", "TBD"),
+                    "home_pitcher": a.get("home_pitcher", "TBD"),
+                    "away_pitcher_era": a.get("away_pitcher_era"),
+                    "home_pitcher_era": a.get("home_pitcher_era"),
+                    "away_pitcher_wins": a.get("away_pitcher_wins"),
+                    "away_pitcher_losses": a.get("away_pitcher_losses"),
+                    "home_pitcher_wins": a.get("home_pitcher_wins"),
+                    "home_pitcher_losses": a.get("home_pitcher_losses"),
+                    "away_pitcher_throws": a.get("away_pitcher_throws", "R"),
+                    "home_pitcher_throws": a.get("home_pitcher_throws", "R"),
                 }
                 approved.append(ou_dict)
 
@@ -1594,6 +1624,16 @@ def risk_filter(analyses: list) -> list:
                     "ml_odds": f5_ml_odds,
                     "ev_score": ev_f5,
                     "kelly_fraction": kelly_stake(f5["confidence"] / 10 * 100, f5_ml_odds),
+                    "away_pitcher": a.get("away_pitcher", "TBD"),
+                    "home_pitcher": a.get("home_pitcher", "TBD"),
+                    "away_pitcher_era": a.get("away_pitcher_era"),
+                    "home_pitcher_era": a.get("home_pitcher_era"),
+                    "away_pitcher_wins": a.get("away_pitcher_wins"),
+                    "away_pitcher_losses": a.get("away_pitcher_losses"),
+                    "home_pitcher_wins": a.get("home_pitcher_wins"),
+                    "home_pitcher_losses": a.get("home_pitcher_losses"),
+                    "away_pitcher_throws": a.get("away_pitcher_throws", "R"),
+                    "home_pitcher_throws": a.get("home_pitcher_throws", "R"),
                 }
                 approved.append(f5_dict)
 

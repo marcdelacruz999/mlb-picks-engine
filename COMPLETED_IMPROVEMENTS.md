@@ -176,3 +176,7 @@ Each entry uses an HTML comment marker for reliable ID matching:
 **Date:** 2026-04-16
 **Commit:** feat: add pitcher vs team matchup history signal to pitching agent
 **Summary:** get_pitcher_vs_team_history(pitcher_id, opponent_team_id, days=365) added to database.py — queries pitcher_game_logs for starts vs a specific opponent (requires ≥2 starts). Integrated into score_pitching() in analysis.py: if SP's ERA vs this team deviates ≥0.75 from their blended season ERA, applies ±0.06 score adjustment and appends a matchup note to the edge string. 6 tests in tests/test_pitcher_vs_team.py covering None on <2 starts, correct ERA/WHIP/K9 math, relief exclusion, days-window cutoff, opponent isolation, and score_pitching integration.
+
+## 2026-04-16 — Agent Weight Rebalance
+<!-- id: weight_rebalance -->
+Live data (20 picks): pitching has strongest differential (+0.0800). Nudging weights toward signal.

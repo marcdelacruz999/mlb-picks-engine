@@ -142,6 +142,29 @@ def _format_pick_message(pick: dict) -> str:
 
     game_time_str = _format_game_time(pick.get("game_time_utc", ""))
 
+    def _sp_line(name, throws, wins, losses, era):
+        parts = [f"{name} {throws}HP"]
+        if wins is not None and losses is not None:
+            parts.append(f"{wins}-{losses}")
+        if era is not None and era > 0:
+            parts.append(f"{era:.2f} ERA")
+        return " | ".join(parts)
+
+    away_sp = _sp_line(
+        pick.get("away_pitcher", "TBD"),
+        pick.get("away_pitcher_throws", "R"),
+        pick.get("away_pitcher_wins"),
+        pick.get("away_pitcher_losses"),
+        pick.get("away_pitcher_era"),
+    )
+    home_sp = _sp_line(
+        pick.get("home_pitcher", "TBD"),
+        pick.get("home_pitcher_throws", "R"),
+        pick.get("home_pitcher_wins"),
+        pick.get("home_pitcher_losses"),
+        pick.get("home_pitcher_era"),
+    )
+
     msg = (
         f"🚨⚾ **MLB HIGH-CONFIDENCE PICK** ⚾🚨\n"
         f"\n"
@@ -149,6 +172,7 @@ def _format_pick_message(pick: dict) -> str:
     )
     if game_time_str:
         msg += f"🕐 **Date/Time:** {game_time_str}\n"
+    msg += f"⚾ **Matchup:** {away_sp} @ {home_sp}\n"
     msg += (
         f"🎯 **Pick:** {pick_display}\n"
         f"💪 **Confidence:** {pick.get('confidence', '?')}/10\n"

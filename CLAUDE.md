@@ -115,6 +115,10 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **--collect runs all three collectors** — `collect_boxscores`, `collect_game_totals`, `collect_batter_boxscores`. Missing any leaves gaps in batter streaks and O/U bias tracking.
 
+**fetch_pitcher_stats() returns {} on no season stats** — if a pitcher hasn't started yet, `home_pitcher_stats` is `{}` and `home_p.get('name','?')` → `'?'`. Always fall back to `game.get('home_pitcher_name')` (populated from `probablePitcher.fullName` in schedule fetch). Fixed in `score_pitching()` in analysis.py.
+
+**Manual Discord pick edit** — to patch an existing pick message: build a pick dict with `game`, `away_team`, `home_team`, `game_time_utc`, `kelly_fraction`, and all `edge_*` fields, then call `discord_bot.send_pick_edit(discord_message_id, pick_dict)`. The `discord_message_id` is stored in the `picks` table.
+
 ---
 
 ## Reference Docs
