@@ -406,3 +406,97 @@ def test_collect_batter_boxscores_stores_new_fields(tmp_path, monkeypatch):
     assert row["runs"] == 1
     assert row["stolen_bases"] == 1
     assert row["plate_appearances"] == 5
+
+
+def test_get_pitcher_pitch_count_rolling(tmp_path, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    now = datetime.now().isoformat()
+    for i, (gid, pc) in enumerate([(1, 95), (2, 102), (3, 88)]):
+        conn.execute("""
+            INSERT INTO pitcher_game_logs
+            (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id,
+             is_starter, innings_pitched, earned_runs, strikeouts, walks,
+             hits, home_runs, pitch_count, created_at)
+            VALUES (?,date('now', ? || ' days'),999,'P',1,1,6.0,2,7,2,5,0,?,?)
+        """, (gid, str(-(i+1)), pc, now))
+    conn.commit()
+    conn.close()
+
+    result = database.get_pitcher_pitch_count_rolling(999, days=21)
+    assert result is not None
+    assert result["starts"] == 3
+    assert result["avg_pitch_count"] == round((95 + 102 + 88) / 3, 1)
+    assert result["last_pitch_count"] == 88
+
+
+def test_get_pitcher_gb_fb_rate(tmp_path, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    now = datetime.now().isoformat()
+    conn.execute("""
+        INSERT INTO pitcher_game_logs
+        (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id,
+         is_starter, innings_pitched, earned_runs, strikeouts, walks,
+         hits, home_runs, ground_outs, fly_outs, created_at)
+        VALUES (1,date('now','-1 days'),999,'P',1,1,6.0,2,7,2,5,0,12,5,?)
+    """, (now,))
+    conn.commit()
+    conn.close()
+
+    result = database.get_pitcher_gb_fb_rate(999, days=21)
+    assert result is not None
+    assert result["ground_outs"] == 12
+    assert result["fly_outs"] == 5
+    assert result["gb_pct"] == round(12 / (12 + 5), 3)
+
+
+def test_get_bullpen_inherited_runner_rate(tmp_path, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    now = datetime.now().isoformat()
+    for pid, ir, irs in [(1, 2, 1), (2, 2, 1), (3, 1, 0)]:
+        conn.execute("""
+            INSERT INTO pitcher_game_logs
+            (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id,
+             is_starter, innings_pitched, earned_runs, strikeouts, walks,
+             hits, home_runs, inherited_runners, inherited_runners_scored, created_at)
+            VALUES (?,date('now','-1 days'),?,'R',1,0,1.0,0,1,0,1,0,?,?,?)
+        """, (pid, pid, ir, irs, now))
+    conn.commit()
+    conn.close()
+
+    result = database.get_bullpen_inherited_runner_rate(1, days=7)
+    assert result is not None
+    assert result["inherited_runners"] == 5
+    assert result["inherited_runners_scored"] == 2
+    assert result["strand_rate"] == round(1 - 2/5, 3)
+
+
+def test_get_team_stolen_base_rate(tmp_path, monkeypatch):
+    from datetime import datetime
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    now = datetime.now().isoformat()
+    for i in range(5):
+        conn.execute("""
+            INSERT INTO batter_game_logs
+            (mlb_game_id, game_date, batter_id, batter_name, team_id,
+             at_bats, hits, doubles, triples, home_runs, rbi, walks,
+             strikeouts, stolen_bases, created_at)
+            VALUES (?,date('now','-'||?||' days'),?,'B',1,4,1,0,0,0,0,0,0,?,?)
+        """, (i+1, i+1, i+100, 1 if i < 3 else 0, now))
+    conn.commit()
+    conn.close()
+
+    result = database.get_team_stolen_base_rate(1, days=14)
+    assert result is not None
+    assert result["stolen_bases"] == 3
+    assert result["games"] == 5

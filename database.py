@@ -1160,6 +1160,91 @@ def get_pitcher_rolling_stats_adjusted(pitcher_id: int, days: int = 21,
     }
 
 
+def get_pitcher_pitch_count_rolling(pitcher_id: int, days: int = 21,
+                                    as_of_date: str = None) -> "Optional[dict]":
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    rows = conn.execute("""
+        SELECT pitch_count, game_date
+        FROM pitcher_game_logs
+        WHERE pitcher_id=? AND is_starter=1 AND game_date > ? AND pitch_count > 0
+        ORDER BY game_date ASC
+    """, (pitcher_id, cutoff.isoformat())).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    counts = [r["pitch_count"] for r in rows]
+    return {
+        "starts": len(counts),
+        "avg_pitch_count": round(sum(counts) / len(counts), 1),
+        "last_pitch_count": counts[0],
+    }
+
+
+def get_pitcher_gb_fb_rate(pitcher_id: int, days: int = 21,
+                           as_of_date: str = None) -> "Optional[dict]":
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT SUM(ground_outs) as go, SUM(fly_outs) as fo
+        FROM pitcher_game_logs
+        WHERE pitcher_id=? AND game_date > ? AND (ground_outs > 0 OR fly_outs > 0)
+    """, (pitcher_id, cutoff.isoformat())).fetchone()
+    conn.close()
+    if not row or (not row["go"] and not row["fo"]):
+        return None
+    go = row["go"] or 0
+    fo = row["fo"] or 0
+    total = go + fo
+    return {
+        "ground_outs": go,
+        "fly_outs": fo,
+        "gb_pct": round(go / total, 3) if total > 0 else None,
+    }
+
+
+def get_bullpen_inherited_runner_rate(team_id: int, days: int = 7,
+                                      as_of_date: str = None) -> "Optional[dict]":
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT SUM(inherited_runners) as ir, SUM(inherited_runners_scored) as irs
+        FROM pitcher_game_logs
+        WHERE team_id=? AND is_starter=0 AND game_date > ? AND inherited_runners > 0
+    """, (team_id, cutoff.isoformat())).fetchone()
+    conn.close()
+    if not row or not row["ir"]:
+        return None
+    ir = row["ir"]
+    irs = row["irs"] or 0
+    return {
+        "inherited_runners": ir,
+        "inherited_runners_scored": irs,
+        "strand_rate": round(1 - irs / ir, 3),
+    }
+
+
+def get_team_stolen_base_rate(team_id: int, days: int = 14,
+                              as_of_date: str = None) -> "Optional[dict]":
+    cutoff = (date.fromisoformat(as_of_date) if as_of_date else date.today()) - timedelta(days=days)
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT SUM(stolen_bases) as sb, COUNT(DISTINCT game_date) as games
+        FROM batter_game_logs
+        WHERE team_id=? AND game_date > ?
+    """, (team_id, cutoff.isoformat())).fetchone()
+    conn.close()
+    if not row or not row["games"]:
+        return None
+    sb = row["sb"] or 0
+    games = row["games"]
+    return {
+        "stolen_bases": sb,
+        "games": games,
+        "sb_per_game": round(sb / games, 2),
+    }
+
+
 def get_pitcher_vs_team_history(pitcher_id: int, opponent_team_id: int, days: int = 365) -> "dict | None":
     """
     Historical performance for a specific pitcher vs a specific opponent team.
