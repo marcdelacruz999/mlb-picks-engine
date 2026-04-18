@@ -89,5 +89,6 @@ Read these only when working in that area:
 - **`docs/optimizer.md`** — optimizer mechanics, backtest reference, code queue, 7-day throttle
 - **`docs/testing.md`** — test run command, mock patch rules, DB test pattern, pre-existing failures
 - **`docs/gotchas.md`** — Python/env quirks, MLB API surprises, operational traps
+- **`docs/infrastructure.md`** — VPS backup schedule, disaster recovery, API key locations
 - **`PIPELINE.md`** — full architecture diagram, agent pipeline, pick filter gates, launchd schedule
 - **`INSIGHTS.md`** — calibration data, bias log, weight tuning history
