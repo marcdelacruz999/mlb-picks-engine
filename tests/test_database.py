@@ -317,3 +317,45 @@ def test_collect_boxscores_returns_new_pitcher_fields(monkeypatch):
     assert pitcher["fly_outs"] == 5
     assert pitcher["inherited_runners"] == 0
     assert pitcher["inherited_runners_scored"] == 0
+
+
+def test_store_pitcher_logs_writes_new_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    pitcher_logs = [{
+        "mlb_game_id": 999, "game_date": "2026-04-17",
+        "pitcher_id": 100, "pitcher_name": "Test P", "team_id": 1,
+        "is_starter": 1, "opponent_team_id": 2,
+        "innings_pitched": 6.0, "earned_runs": 2, "strikeouts": 7,
+        "walks": 1, "hits": 5, "home_runs": 0,
+        "pitch_count": 94, "batters_faced": 22,
+        "ground_outs": 8, "fly_outs": 5,
+        "inherited_runners": 0, "inherited_runners_scored": 0,
+    }]
+    database.store_pitcher_game_logs(pitcher_logs)
+    conn = database.get_connection()
+    row = conn.execute("SELECT * FROM pitcher_game_logs WHERE pitcher_id=100").fetchone()
+    conn.close()
+    assert row["pitch_count"] == 94
+    assert row["batters_faced"] == 22
+    assert row["ground_outs"] == 8
+    assert row["fly_outs"] == 5
+
+def test_store_team_logs_writes_pitching_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    team_logs = [{
+        "mlb_game_id": 999, "game_date": "2026-04-17",
+        "team_id": 1, "is_away": 0,
+        "runs": 5, "hits": 9, "home_runs": 1,
+        "strikeouts": 8, "walks": 3, "at_bats": 33, "left_on_base": 6,
+        "pitching_strikeouts": 11, "pitching_walks": 2,
+        "pitching_hits_allowed": 7, "pitching_earned_runs": 3,
+        "pitching_home_runs_allowed": 1,
+    }]
+    database.store_team_game_logs(team_logs)
+    conn = database.get_connection()
+    row = conn.execute("SELECT * FROM team_game_logs WHERE team_id=1").fetchone()
+    conn.close()
+    assert row["pitching_strikeouts"] == 11
+    assert row["pitching_earned_runs"] == 3

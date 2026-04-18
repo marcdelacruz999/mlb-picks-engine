@@ -989,6 +989,74 @@ def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
     conn.close()
 
 
+def store_pitcher_game_logs(pitcher_logs: list) -> int:
+    """Store pitcher game logs with full stat fields including pitch_count, batters_faced, etc."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    inserted = 0
+    for log in pitcher_logs:
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO pitcher_game_logs
+                (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id,
+                 is_starter, opponent_team_id, innings_pitched, earned_runs,
+                 strikeouts, walks, hits, home_runs,
+                 pitch_count, batters_faced, ground_outs, fly_outs,
+                 inherited_runners, inherited_runners_scored, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                log["mlb_game_id"], log["game_date"], log["pitcher_id"],
+                log.get("pitcher_name", "Unknown"), log["team_id"],
+                int(log.get("is_starter", 0)), log.get("opponent_team_id"),
+                log["innings_pitched"], log.get("earned_runs", 0),
+                log.get("strikeouts", 0), log.get("walks", 0),
+                log.get("hits", 0), log.get("home_runs", 0),
+                log.get("pitch_count", 0), log.get("batters_faced", 0),
+                log.get("ground_outs", 0), log.get("fly_outs", 0),
+                log.get("inherited_runners", 0), log.get("inherited_runners_scored", 0),
+                now,
+            ))
+            inserted += conn.execute("SELECT changes()").fetchone()[0]
+        except sqlite3.DatabaseError as e:
+            print(f"[DB] store_pitcher_game_logs error: {e}")
+    conn.commit()
+    conn.close()
+    return inserted
+
+
+def store_team_game_logs(team_logs: list) -> int:
+    """Store team game logs with full stat fields including pitching stats."""
+    conn = get_connection()
+    now = datetime.utcnow().isoformat()
+    inserted = 0
+    for log in team_logs:
+        try:
+            conn.execute("""
+                INSERT OR IGNORE INTO team_game_logs
+                (mlb_game_id, game_date, team_id, is_away,
+                 runs, hits, home_runs, strikeouts, walks, at_bats, left_on_base,
+                 pitching_strikeouts, pitching_walks, pitching_hits_allowed,
+                 pitching_earned_runs, pitching_home_runs_allowed, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                log["mlb_game_id"], log["game_date"], log["team_id"],
+                int(log.get("is_away", 0)),
+                log.get("runs", 0), log.get("hits", 0), log.get("home_runs", 0),
+                log.get("strikeouts", 0), log.get("walks", 0),
+                log.get("at_bats", 0), log.get("left_on_base", 0),
+                log.get("pitching_strikeouts", 0), log.get("pitching_walks", 0),
+                log.get("pitching_hits_allowed", 0), log.get("pitching_earned_runs", 0),
+                log.get("pitching_home_runs_allowed", 0),
+                now,
+            ))
+            inserted += conn.execute("SELECT changes()").fetchone()[0]
+        except sqlite3.DatabaseError as e:
+            print(f"[DB] store_team_game_logs error: {e}")
+    conn.commit()
+    conn.close()
+    return inserted
+
+
 def get_pitcher_rolling_stats(pitcher_id: int, days: int = 21,
                                as_of_date: str = None) -> "dict | None":
     """
