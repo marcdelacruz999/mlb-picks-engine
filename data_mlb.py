@@ -224,6 +224,16 @@ def fetch_todays_games(target_date: str = None) -> list:
     games = []
     for d in data.get("dates", []):
         for g in d.get("games", []):
+            # Skip postponed, cancelled, and suspended games
+            detailed_state = g.get("status", {}).get("detailedState", "Scheduled")
+            if detailed_state in {"Postponed", "Cancelled", "Suspended"}:
+                away = g.get("teams", {}).get("away", {})
+                home = g.get("teams", {}).get("home", {})
+                away_team = away.get("team", {}).get("name", "TBD")
+                home_team = home.get("team", {}).get("name", "TBD")
+                print(f"[DATA] Skipping {away_team} @ {home_team} — status: {detailed_state}")
+                continue
+
             away = g.get("teams", {}).get("away", {})
             home = g.get("teams", {}).get("home", {})
 
@@ -247,7 +257,7 @@ def fetch_todays_games(target_date: str = None) -> list:
                 "mlb_game_id": g["gamePk"],
                 "game_date": target_date,
                 "game_time_utc": g.get("gameDate", ""),
-                "status": g.get("status", {}).get("detailedState", "Scheduled"),
+                "status": detailed_state,
                 "away_team_name": away.get("team", {}).get("name", "TBD"),
                 "away_team_mlb_id": away.get("team", {}).get("id"),
                 "home_team_name": home.get("team", {}).get("name", "TBD"),
