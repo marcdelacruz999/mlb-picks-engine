@@ -467,6 +467,47 @@ def init_db():
     except sqlite3.OperationalError:
         pass
 
+    # ── Expand pitcher_game_logs ──
+    for col, typedef in [
+        ("pitch_count", "INTEGER"),
+        ("batters_faced", "INTEGER"),
+        ("ground_outs", "INTEGER"),
+        ("fly_outs", "INTEGER"),
+        ("inherited_runners", "INTEGER"),
+        ("inherited_runners_scored", "INTEGER"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE pitcher_game_logs ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass
+
+    # ── Expand batter_game_logs ──
+    for col, typedef in [
+        ("runs", "INTEGER"),
+        ("stolen_bases", "INTEGER"),
+        ("hit_by_pitch", "INTEGER"),
+        ("plate_appearances", "INTEGER"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE batter_game_logs ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass
+
+    # ── Expand team_game_logs with opponent pitching stats ──
+    for col, typedef in [
+        ("pitching_strikeouts", "INTEGER"),
+        ("pitching_walks", "INTEGER"),
+        ("pitching_hits_allowed", "INTEGER"),
+        ("pitching_earned_runs", "INTEGER"),
+        ("pitching_home_runs_allowed", "INTEGER"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE team_game_logs ADD COLUMN {col} {typedef}")
+        except sqlite3.OperationalError:
+            pass
+
+    conn.commit()
+
     conn.close()
     backfill_game_totals_abbr()
     print("[DB] Database initialized.")
@@ -529,6 +570,22 @@ def get_picks_for_date(target_date: str) -> list:
 def get_today_picks() -> list:
     """Return all discord-sent picks created today."""
     return get_picks_for_date(date.today().isoformat())
+
+
+def get_today_sent_picks_with_game() -> list:
+    """Return today's discord-sent picks joined with mlb_game_id from games table."""
+    conn = get_connection()
+    today = date.today().isoformat()
+    rows = conn.execute(
+        """SELECT p.*, g.mlb_game_id
+           FROM picks p
+           JOIN games g ON p.game_id = g.id
+           WHERE p.created_at LIKE ? AND p.discord_sent=1
+           ORDER BY p.confidence DESC""",
+        (f"{today}%",)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def get_pending_picks_for_date(target_date: str) -> list:

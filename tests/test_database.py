@@ -216,3 +216,40 @@ def test_get_game_totals_missing_weather_returns_game_date(db_path, monkeypatch)
     match = [r for r in rows if r[0] == 777005]
     assert len(match) == 1
     assert match[0][1] == '2026-04-13'
+
+
+def test_pitcher_game_logs_new_columns(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(pitcher_game_logs)").fetchall()]
+    assert "pitch_count" in cols
+    assert "batters_faced" in cols
+    assert "ground_outs" in cols
+    assert "fly_outs" in cols
+    assert "inherited_runners" in cols
+    assert "inherited_runners_scored" in cols
+    conn.close()
+
+def test_batter_game_logs_new_columns(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(batter_game_logs)").fetchall()]
+    assert "runs" in cols
+    assert "stolen_bases" in cols
+    assert "hit_by_pitch" in cols
+    assert "plate_appearances" in cols
+    conn.close()
+
+def test_team_game_logs_pitching_columns(tmp_path, monkeypatch):
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+    conn = database.get_connection()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(team_game_logs)").fetchall()]
+    assert "pitching_strikeouts" in cols
+    assert "pitching_walks" in cols
+    assert "pitching_hits_allowed" in cols
+    assert "pitching_earned_runs" in cols
+    assert "pitching_home_runs_allowed" in cols
+    conn.close()
