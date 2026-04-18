@@ -124,3 +124,9 @@ DELETE FROM opening_lines; DELETE FROM scratch_alerts; DELETE FROM daily_results
 **SQLite date('now') is local time** — in tests use `datetime.now().isoformat()` (not `datetime.utcnow()`) for `created_at` inserts, or queries filtering by `date('now')` will miss the row.
 
 **get_today_sent_picks_with_game()** — joins `picks` + `games` to return `mlb_game_id` alongside pick fields. Use this (not the current run's `approved` list) when building the ML/O/U boards so picks sent in earlier runs are included.
+
+**`store_boxscores()` is the real write path** — `engine.py` calls `db.store_boxscores(pitcher_logs, team_logs)`, not `store_pitcher_game_logs()` / `store_team_game_logs()`. Add new pitcher/team columns here, not in the standalone functions.
+
+**Rolling stat queries use `ORDER BY game_date DESC`** — `rows[0]` = most recent start. Using `ASC` returns the oldest game silently, giving wrong fatigue/form signals.
+
+**INSERT OR IGNORE never updates existing rows** — when new columns are added, already-collected rows keep NULL/0 for those columns. Data fills in on the next nightly `--collect`.
