@@ -843,7 +843,11 @@ def run_results():
             "ml_correct": log_correct, "ml_incorrect": log_incorrect,
             "ou_correct": log_ou_correct, "ou_incorrect": log_ou_incorrect,
         }
-        send_nightly_report(_results, log_entries, _sent_picks_by_game, _mlb_to_local)
+        if db.is_daily_report_sent(grading_date):
+            print(f"[REPORT] Nightly report already sent for {grading_date} — skipping.")
+        else:
+            if send_nightly_report(_results, log_entries, _sent_picks_by_game, _mlb_to_local):
+                db.mark_daily_report_sent(grading_date)
         return
 
     roi = round((wins - losses) / max(total, 1) * 100, 1)
@@ -964,7 +968,11 @@ def run_results():
     print(f"\n  Record: {wins}W - {losses}L - {pushes}P  |  ROI: {roi}%")
 
     # ── Send nightly report to Discord ──
-    send_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local)
+    if db.is_daily_report_sent(grading_date):
+        print(f"[REPORT] Nightly report already sent for {grading_date} — skipping.")
+    else:
+        if send_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local):
+            db.mark_daily_report_sent(grading_date)
 
     # ── Collect and store post-game boxscore data ──
     print("\n[DATA] Collecting post-game boxscore data...")
@@ -1208,7 +1216,11 @@ def run_report(target_date: Optional[str] = None) -> None:
         "pick_lines": [],
     }
 
-    send_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local)
+    if db.is_daily_report_sent(grade_date):
+        print(f"[REPORT] Nightly report already sent for {grade_date} — skipping.")
+    else:
+        if send_nightly_report(results, log_entries, sent_picks_by_game, mlb_to_local):
+            db.mark_daily_report_sent(grade_date)
 
 
 def main():

@@ -506,6 +506,12 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+    # ── Expand daily_results with report_sent flag ──
+    try:
+        conn.execute("ALTER TABLE daily_results ADD COLUMN report_sent INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
 
     conn.close()
@@ -829,23 +835,47 @@ def save_odds(odds: dict):
 
 # ── Results & ROI ────────────────────────────────────────
 
-def save_daily_results(results: dict):
+def save_daily_results(results: dict, report_sent: int = 0):
     """Save or update daily results summary."""
     conn = get_connection()
     now = datetime.utcnow().isoformat()
     today = date.today().isoformat()
     conn.execute("""
         INSERT OR REPLACE INTO daily_results
-        (result_date, wins, losses, pushes, roi, best_pick, worst_miss, notes, created_at)
-        VALUES (?,?,?,?,?,?,?,?,?)
+        (result_date, wins, losses, pushes, roi, best_pick, worst_miss, notes, created_at, report_sent)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
     """, (
         today, results.get("wins", 0), results.get("losses", 0),
         results.get("pushes", 0), results.get("roi"),
         results.get("best_pick"), results.get("worst_miss"),
-        results.get("notes"), now
+        results.get("notes"), now, report_sent
     ))
     conn.commit()
     conn.close()
+
+
+def mark_daily_report_sent(result_date: str) -> None:
+    """Set report_sent=1 for the given result_date to prevent duplicate Discord sends."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE daily_results SET report_sent=1 WHERE result_date=?",
+        (result_date,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def is_daily_report_sent(result_date: str) -> bool:
+    """Return True if the nightly report has already been sent for result_date."""
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT report_sent FROM daily_results WHERE result_date=?",
+        (result_date,)
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return False
+    return bool(row["report_sent"])
 
 
 def get_roi_summary(days: int = 30) -> dict:
