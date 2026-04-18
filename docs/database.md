@@ -143,3 +143,7 @@ DELETE FROM opening_lines; DELETE FROM scratch_alerts; DELETE FROM daily_results
 **Rolling stat queries use `ORDER BY game_date DESC`** — `rows[0]` = most recent start. Using `ASC` returns the oldest game silently, giving wrong fatigue/form signals.
 
 **INSERT OR IGNORE never updates existing rows** — when new columns are added, already-collected rows keep NULL/0 for those columns. Data fills in on the next nightly `--collect`.
+
+**New columns need an UPDATE backfill** — INSERT OR IGNORE rows never get new columns populated. Write a standalone `backfill_*.py` that UPDATEs existing rows matched by `(mlb_game_id, pitcher_id)` etc., run it, verify, delete it, commit. Don't reuse INSERT-based scripts.
+
+**Verify column names against init_db() before writing docs** — subagents drafting schema docs must check actual column names in the `init_db()` migration block or via `SELECT * FROM table LIMIT 1`, not infer them from context. Caused `team_k`/`team_pitches` fiction vs real `pitching_strikeouts`/`pitching_walks` names.
