@@ -1496,6 +1496,8 @@ def kelly_stake(win_prob_pct: float, ml_odds) -> float:
         return 1.0
     full_kelly = (b * p - q) / b
     half_kelly = full_kelly * 0.5
+    if half_kelly <= 0:
+        return 0.0
     return round(max(0.25, min(half_kelly, 2.0)), 2)
 
 
