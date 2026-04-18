@@ -119,11 +119,13 @@ INSIGHTS.md        — calibration log, bias tracker, weight tuning history
 
 **Manual Discord pick edit** — to patch an existing pick message: build a pick dict with `game`, `away_team`, `home_team`, `game_time_utc`, `kelly_fraction`, and all `edge_*` fields, then call `discord_bot.send_pick_edit(discord_message_id, pick_dict)`. The `discord_message_id` is stored in the `picks` table.
 
-**`analysis_log.ml_pick_team` ≠ sent pick** — analysis_log stores the raw model call; `picks` table is ground truth for what was actually sent to Discord. They diverge when a later run flips the pick side. Nightly report confidence section must use `picks.status` (won/lost), not `analysis_log.ml_status`.
+**Nightly report confidence picks use `picks.status` not `analysis_log.ml_status`** — the sent pick can differ from the raw model call (e.g. a later run flips the side). Always read WON/LOST from `picks.status` in the confidence section, not `analysis_log.ml_status`.
 
-**ML/O/U boards use `db.get_today_sent_picks_with_game()`** — boards must reflect all sent picks from any run today, not just the current run's `approved` list. This function joins `picks` + `games` to include `mlb_game_id` alongside pick fields.
+**`analysis_log.ml_pick_team` ≠ sent pick** — analysis_log stores the raw model call; `picks` table is ground truth for what was actually sent to Discord. They diverge when later runs flip the pick side. Never use analysis_log to determine confidence pick outcomes.
 
-**NULL scores after `--results`** — if a game shows 0-0/pending, fetch directly: `requests.get('https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=YYYY-MM-DD&hydrate=linescore')` then patch `analysis_log` (actual_away_score, actual_home_score, actual_total, ml_status, ou_status) and `games` (away_score, home_score, total_runs) manually.
+**ML/O/U boards: use `db.get_today_sent_picks_with_game()` for ground truth** — boards must reflect all sent picks from any run today, not just the current run's `approved` list. This function joins `picks` + `games` to return `mlb_game_id` alongside pick fields. Pass result as `approved=` to `send_daily_board()` and `send_ou_board()`.
+
+**Stuck game with 0-0 score after `--results`** — if a game has NULL scores and `pending` status, fetch directly: `requests.get('https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=YYYY-MM-DD&hydrate=linescore')` then patch `games` and `analysis_log` tables manually with correct scores and statuses.
 
 ---
 
