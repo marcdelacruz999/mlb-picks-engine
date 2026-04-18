@@ -219,7 +219,7 @@ pitcher_game_logs:
 team_game_logs:
     mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs,
     strikeouts, walks, at_bats, left_on_base,
-    team_k, team_bb, team_hits_allowed, team_earned_runs, team_pitches
+    pitching_strikeouts, pitching_walks, pitching_hits_allowed, pitching_earned_runs, pitching_home_runs_allowed
 
 batter_game_logs:
     mlb_game_id, game_date, player_id, team_id, at_bats, hits, doubles, triples,

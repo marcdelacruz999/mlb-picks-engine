@@ -42,7 +42,7 @@ pitch_count, batters_faced, ground_outs, fly_outs, inherited_runners, inherited_
 
 ### team_game_logs columns
 `id, mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs, strikeouts, walks, at_bats,
-team_k, team_bb, team_hits_allowed, team_earned_runs, team_pitches`
+pitching_strikeouts, pitching_walks, pitching_hits_allowed, pitching_earned_runs, pitching_home_runs_allowed`
 
 ### batter_game_logs columns
 `id, mlb_game_id, game_date, batter_id, batter_name, team_id, ops, strikeouts, walks, at_bats, hits,
