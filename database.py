@@ -1409,8 +1409,9 @@ def collect_batter_boxscores(game_date: str) -> int:
                         INSERT OR IGNORE INTO batter_game_logs
                         (mlb_game_id, game_date, batter_id, batter_name, team_id,
                          at_bats, hits, doubles, triples, home_runs, rbi, walks,
-                         strikeouts, created_at)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                         strikeouts, runs, stolen_bases, hit_by_pitch,
+                         plate_appearances, created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """, (
                         game_pk, game_date, bid,
                         player.get("person", {}).get("fullName", "Unknown"),
@@ -1423,6 +1424,10 @@ def collect_batter_boxscores(game_date: str) -> int:
                         bstats.get("rbi", 0) or 0,
                         walks,
                         bstats.get("strikeOuts", 0) or 0,
+                        bstats.get("runs", 0) or 0,
+                        bstats.get("stolenBases", 0) or 0,
+                        bstats.get("hitByPitch", 0) or 0,
+                        bstats.get("plateAppearances", 0) or 0,
                         now,
                     ))
                     if conn.execute("SELECT changes()").fetchone()[0]:

@@ -359,3 +359,50 @@ def test_store_team_logs_writes_pitching_fields(tmp_path, monkeypatch):
     conn.close()
     assert row["pitching_strikeouts"] == 11
     assert row["pitching_earned_runs"] == 3
+
+def test_collect_batter_boxscores_stores_new_fields(tmp_path, monkeypatch):
+    import requests as req
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+    database.init_db()
+
+    fake_schedule = {"dates": [{"games": [{"gamePk": 999, "status": {"abstractGameState": "Final"}}]}]}
+    fake_boxscore = {
+        "teams": {
+            "away": {
+                "team": {"id": 1},
+                "batters": [200],
+                "players": {
+                    "ID200": {
+                        "person": {"fullName": "Test Batter"},
+                        "stats": {
+                            "batting": {
+                                "atBats": 4, "hits": 2, "doubles": 1, "triples": 0,
+                                "homeRuns": 0, "rbi": 1, "baseOnBalls": 1,
+                                "strikeOuts": 1, "runs": 1, "stolenBases": 1,
+                                "hitByPitch": 0, "plateAppearances": 5,
+                            },
+                            "pitching": {},
+                        },
+                    }
+                },
+            },
+            "home": {"team": {"id": 2}, "batters": [], "players": {}},
+        }
+    }
+
+    import unittest.mock as mock
+    def fake_get(url, timeout=15):
+        r = mock.MagicMock()
+        r.raise_for_status = lambda: None
+        r.json.return_value = fake_schedule if "schedule" in url else fake_boxscore
+        return r
+
+    monkeypatch.setattr(req, "get", fake_get)
+
+    database.collect_batter_boxscores("2026-04-17")
+    conn = database.get_connection()
+    row = conn.execute("SELECT * FROM batter_game_logs WHERE batter_id=200").fetchone()
+    conn.close()
+    assert row["runs"] == 1
+    assert row["stolen_bases"] == 1
+    assert row["plate_appearances"] == 5
