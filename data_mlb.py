@@ -675,9 +675,16 @@ def collect_boxscores(game_date: str) -> dict:
                     "walks": pstats.get("baseOnBalls", 0) or 0,
                     "hits": pstats.get("hits", 0) or 0,
                     "home_runs": pstats.get("homeRuns", 0) or 0,
+                    "pitch_count": pstats.get("numberOfPitches", 0) or 0,
+                    "batters_faced": pstats.get("battersFaced", 0) or 0,
+                    "ground_outs": pstats.get("groundOuts", 0) or 0,
+                    "fly_outs": pstats.get("airOuts", 0) or 0,
+                    "inherited_runners": pstats.get("inheritedRunners", 0) or 0,
+                    "inherited_runners_scored": pstats.get("inheritedRunnersScored", 0) or 0,
                 })
 
             bat = team_data.get("teamStats", {}).get("batting", {})
+            pit = team_data.get("teamStats", {}).get("pitching", {})
             team_logs.append({
                 "mlb_game_id": game_pk,
                 "game_date": game_date,
@@ -690,6 +697,11 @@ def collect_boxscores(game_date: str) -> dict:
                 "walks": bat.get("baseOnBalls", 0) or 0,
                 "at_bats": bat.get("atBats", 0) or 0,
                 "left_on_base": bat.get("leftOnBase", 0) or 0,
+                "pitching_strikeouts": pit.get("strikeOuts", 0) or 0,
+                "pitching_walks": pit.get("baseOnBalls", 0) or 0,
+                "pitching_hits_allowed": pit.get("hits", 0) or 0,
+                "pitching_earned_runs": pit.get("earnedRuns", 0) or 0,
+                "pitching_home_runs_allowed": pit.get("homeRuns", 0) or 0,
             })
 
         time.sleep(0.2)  # polite to the API between game fetches

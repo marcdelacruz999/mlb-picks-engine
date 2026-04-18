@@ -253,3 +253,67 @@ def test_team_game_logs_pitching_columns(tmp_path, monkeypatch):
     assert "pitching_earned_runs" in cols
     assert "pitching_home_runs_allowed" in cols
     conn.close()
+
+def test_collect_boxscores_returns_new_pitcher_fields(monkeypatch):
+    """collect_boxscores pitcher dicts include new fields."""
+    import data_mlb
+    import unittest.mock as mock
+
+    fake_schedule = {"dates": [{"games": [{"gamePk": 999, "status": {"abstractGameState": "Final"}}]}]}
+    fake_boxscore = {
+        "teams": {
+            "away": {
+                "team": {"id": 1},
+                "pitchers": [100],
+                "players": {
+                    "ID100": {
+                        "person": {"fullName": "Test Pitcher"},
+                        "stats": {
+                            "pitching": {
+                                "inningsPitched": "6.0",
+                                "earnedRuns": 2,
+                                "strikeOuts": 7,
+                                "baseOnBalls": 1,
+                                "hits": 5,
+                                "homeRuns": 0,
+                                "numberOfPitches": 94,
+                                "battersFaced": 22,
+                                "groundOuts": 8,
+                                "airOuts": 5,
+                                "inheritedRunners": 0,
+                                "inheritedRunnersScored": 0,
+                            }
+                        },
+                    }
+                },
+                "teamStats": {"batting": {}, "pitching": {}},
+            },
+            "home": {
+                "team": {"id": 2},
+                "pitchers": [],
+                "players": {},
+                "teamStats": {"batting": {}, "pitching": {}},
+            },
+        }
+    }
+
+    def fake_get(url, timeout=15):
+        r = mock.MagicMock()
+        r.raise_for_status = lambda: None
+        if "schedule" in url:
+            r.json.return_value = fake_schedule
+        else:
+            r.json.return_value = fake_boxscore
+        return r
+
+    monkeypatch.setattr(data_mlb.requests, "get", fake_get)
+    monkeypatch.setattr(data_mlb.time, "sleep", lambda x: None)
+
+    result = data_mlb.collect_boxscores("2026-04-17")
+    pitcher = result["pitcher_logs"][0]
+    assert pitcher["pitch_count"] == 94
+    assert pitcher["batters_faced"] == 22
+    assert pitcher["ground_outs"] == 8
+    assert pitcher["fly_outs"] == 5
+    assert pitcher["inherited_runners"] == 0
+    assert pitcher["inherited_runners_scored"] == 0
