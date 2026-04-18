@@ -95,6 +95,8 @@ Game Dict
     │     Blend: <5gs = season only | 5-9 = 40% rolling | 10-19 = 60% | ≥20 = 75%
     │     Rest: short (<4d) = −0.12 | extra (5-6d) = +0.05 | rust (8d+) = −0.03
     │     Handedness: LHP vs K-prone lineup (≥24.5% K rate) = ±0.06
+    │     Pitch count fatigue: last start ≥105 pitches = −0.04 penalty
+    │     GB/FB ratio: GB% ≥55% vs hitter park = −0.04 | FB% ≤35% vs pitcher park = +0.04
     │
     ├─► Offense Agent (20%)
     │     OPS, OBP, SLG, runs/game — blended with 14-day rolling team R/G + OBP proxy
@@ -103,6 +105,7 @@ Game Dict
     ├─► Bullpen Agent (17%)
     │     Team ERA/WHIP/save% — blended with 14-day rolling bullpen ERA/WHIP
     │     Fatigue: last 3 days >12 IP = −0.15 | >8 IP = −0.08
+    │     Inherited runner strand rate: ≥60% (elite) = +0.04 | ≤40% (poor) = −0.04
     │     Key relievers: top 3 by IP (last 7d) with IP-weighted ERA appended to edge
     │
     ├─► Advanced/Statcast Agent (13%)
@@ -113,6 +116,7 @@ Game Dict
     ├─► Momentum Agent (10%)
     │     Win streaks (3+/5+), losing streaks (4+), win % differential
     │     Travel fatigue: road games ≥5 = +0.04 | tz crosses ≥2 = +0.05 | cap 0.08
+    │     Stolen base rate: ≥1.5 SB/game (14d rolling) = +0.04 speed edge
     │
     ├─► Market Agent (10%)
     │     Model prob vs bookmaker implied prob edge (≥5% = alpha signal)
@@ -209,11 +213,18 @@ On demand:
 
 pitcher_game_logs:
     mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
-    opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs
+    opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs,
+    pitch_count, batters_faced, ground_outs, fly_outs, inherited_runners, inherited_runners_scored
 
 team_game_logs:
     mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs,
-    strikeouts, walks, at_bats, left_on_base
+    strikeouts, walks, at_bats, left_on_base,
+    team_k, team_bb, team_hits_allowed, team_earned_runs, team_pitches
+
+batter_game_logs:
+    mlb_game_id, game_date, player_id, team_id, at_bats, hits, doubles, triples,
+    home_runs, rbi, strikeouts, walks,
+    runs, stolen_bases, hit_by_pitch, plate_appearances
 
 Opponent-adjusted ERA:
     weight = opponent_rpg / 4.3  (league avg)

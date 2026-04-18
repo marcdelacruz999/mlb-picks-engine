@@ -471,8 +471,6 @@ def _format_nightly_report(
 
         if conf >= 8:
             tier = "🔥"
-        elif conf >= 7:
-            tier = "🎯"
         elif conf >= 4:
             tier = "➡️"
         else:

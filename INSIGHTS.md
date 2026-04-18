@@ -159,10 +159,16 @@ Action: [watch / adjust weight / add hardcoded correction]
 ### Pitching Agent
 - Rest days logic added 2026-04-10 — monitor if short-rest picks underperform
 - Backtest (2024+2025): lift +0.080 — strongest signal of 4 testable agents, but overweighted at 30%
+- Pitch count fatigue added 2026-04-17: last start ≥105 pitches = −0.04 penalty
+- GB/FB ratio added 2026-04-17: GB% ≥55% vs hitter park = −0.04 | FB% ≤35% vs pitcher park = +0.04
 
 ### Bullpen Agent
 - Backtest (2024+2025): lift +0.050 — rivaled offense despite only 10% weight; raised to 17% on 2026-04-10
 - Fatigue signal added 2026-04-10: heavy use (>12 IP/3d) = −0.15 penalty; moderate (>8 IP/3d) = −0.08; fires automatically each run
+- Inherited runner strand rate added 2026-04-17: ≥60% strand rate = +0.04 | <40% = −0.04
+
+### Momentum / Offense Agent
+- Stolen base rate added 2026-04-17: ≥1.5 SB/game (14d rolling) = +0.04 speed edge
 
 ### Advanced (Statcast) Agent
 - xwOBA luck diff most reliable signal; barrel rate adjustments smaller magnitude

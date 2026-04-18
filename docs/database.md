@@ -8,9 +8,9 @@ SQLite at `mlb_picks.db`. Initialized via `database.init_db()` on every run.
 |-------|---------|
 | `picks` | Approved picks sent to Discord; `pick_type`: moneyline / over / under / f5_ml |
 | `analysis_log` | All 15 games per day; 7 agent score columns; UNIQUE(game_date, mlb_game_id) + INSERT OR REPLACE |
-| `pitcher_game_logs` | Per-start: IP, ER, K, BB, H, HR, opponent_team_id |
-| `team_game_logs` | Per-game: R, H, HR, K, BB, AB per team, is_away flag |
-| `batter_game_logs` | Per-game per batter: OPS, K, BB, AB, H (hot/cold streak signal) |
+| `pitcher_game_logs` | Per-start: IP, ER, K, BB, H, HR, opponent_team_id, pitch_count, GB/FB counts, inherited runners |
+| `team_game_logs` | Per-game: R, H, HR, K, BB, AB per team, is_away flag, team pitching stats (K, BB, H, ER, pitches) |
+| `batter_game_logs` | Per-game per batter: OPS, K, BB, AB, H (hot/cold streak signal), runs, SB, HBP, PA |
 | `opening_lines` | First captured odds per game per day (INSERT OR IGNORE — opening preserved) |
 | `scratch_alerts` | Pitcher scratch dedup: UNIQUE(game_date, mlb_game_id, side) |
 | `lineup_alerts` | Lineup OPS weakness dedup: UNIQUE(mlb_game_id, game_date) |
@@ -37,7 +37,16 @@ score_momentum, score_weather, score_market, ml_status, ou_status, created_at`
 
 ### pitcher_game_logs columns
 `id, mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, opponent_team_id,
-is_starter, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs`
+is_starter, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs,
+pitch_count, batters_faced, ground_outs, fly_outs, inherited_runners, inherited_runners_scored`
+
+### team_game_logs columns
+`id, mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs, strikeouts, walks, at_bats,
+team_k, team_bb, team_hits_allowed, team_earned_runs, team_pitches`
+
+### batter_game_logs columns
+`id, mlb_game_id, game_date, batter_id, batter_name, team_id, ops, strikeouts, walks, at_bats, hits,
+runs, stolen_bases, hit_by_pitch, plate_appearances`
 
 ---
 
@@ -55,6 +64,10 @@ is_starter, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs`
 | `get_opening_lines(game_id)` | Retrieve opening odds for comparison |
 | `get_bullpen_top_relievers(team_id)` | Top 3 relievers by IP (last 7d), IP-weighted ERA |
 | `get_pitcher_rolling_stats_adjusted(pitcher_id)` | Opponent-weighted rolling ERA/WHIP/K9/BB9 |
+| `last_pitch_count(pitcher_id)` | Most recent start pitch count |
+| `get_gb_fb_ratio(pitcher_id, n_games)` | Rolling GB% and FB% over last n starts |
+| `get_inherited_runner_rate(pitcher_id, n_games)` | Inherited runners scored rate (bullpen signal) |
+| `get_team_stolen_base_rate(team_id, n_games)` | Team SB per game rolling over last n games |
 
 ---
 

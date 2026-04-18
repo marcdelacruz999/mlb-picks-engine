@@ -33,6 +33,10 @@ All weights live in `config.py WEIGHTS`. Never hardcode in analysis.py.
 
 **Handedness:** LHP vs high-K lineup (≥24.5% K rate) = ±0.06
 
+**Pitch Count Fatigue:** Last start ≥105 pitches = −0.04 penalty (via `last_pitch_count()`)
+
+**GB/FB Ratio:** GB% ≥55% vs hitter park = −0.04 | FB% ≤35% vs pitcher park = +0.04 (via `get_gb_fb_ratio()`, 21-game rolling)
+
 ---
 
 ## Offense Agent (20%)
@@ -52,6 +56,11 @@ All weights live in `config.py WEIGHTS`. Never hardcode in analysis.py.
 - ≤8.0 IP → no penalty
 - 8–12 IP → −0.08
 - >12 IP → −0.15
+
+**Inherited Runner Strand Rate** (`get_inherited_runner_rate()`, 7-game rolling):
+- ≥60% strand rate (elite): +0.04 bonus
+- <40% strand rate (poor): −0.04 penalty
+- Requires ≥3 inherited runners in sample; else no adjustment
 
 ---
 
@@ -73,6 +82,10 @@ Data from Baseball Savant (3 CSV endpoints, cached daily). Falls back to plate d
   - Road games ≥5 consecutive: +0.04
   - Timezone changes ≥2 in last 5 days: +0.05
   - Cap: 0.08
+
+**Stolen Base Rate** (`get_team_stolen_base_rate()`, 14-game rolling):
+- ≥1.5 SB/game = +0.04 speed edge (offensive pressure signal)
+- Requires ≥5 games of data
 
 ---
 
