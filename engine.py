@@ -670,8 +670,8 @@ def run_results():
         elif pick["pick_type"] == "over":
             total_line = _parse_total_line(pick.get("notes", ""))
             if total_line is None:
-                print(f"  ⚠️  Could not parse total line for pick {pick['id']} — grading as push")
-                status = "push"
+                print(f"  ⚠️  Could not parse total line for pick {pick['id']} — skipping grading (stays pending)")
+                continue
             elif total_runs > total_line:
                 status = "won"
             elif total_runs < total_line:
@@ -682,8 +682,8 @@ def run_results():
         elif pick["pick_type"] == "under":
             total_line = _parse_total_line(pick.get("notes", ""))
             if total_line is None:
-                print(f"  ⚠️  Could not parse total line for pick {pick['id']} — grading as push")
-                status = "push"
+                print(f"  ⚠️  Could not parse total line for pick {pick['id']} — skipping grading (stays pending)")
+                continue
             elif total_runs < total_line:
                 status = "won"
             elif total_runs > total_line:
