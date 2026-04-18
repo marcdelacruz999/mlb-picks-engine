@@ -36,3 +36,11 @@ Same rule applies to any function imported with `from data_mlb import ...` in an
 
 Optimizer runs `pytest` after every code change. On failure → `git_revert()` is called automatically.
 Tests must pass before any change is committed or marked complete.
+
+## DB Test Pattern
+
+```python
+monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "test.db"))
+database.init_db()
+conn = database.get_connection()  # reads DB_PATH, not DATABASE_PATH
+```

@@ -106,3 +106,21 @@ DELETE FROM picks; DELETE FROM games; DELETE FROM analysis_log;
 DELETE FROM opening_lines; DELETE FROM scratch_alerts; DELETE FROM daily_results;
 ```
 (Last done 2026-04-12 — clean start from 2026-04-13 8am run)
+
+---
+
+## Gotchas
+
+**database.py is module-level functions** — NOT a class. Uses `get_connection()` per call. `import database as db` in data_mlb.py.
+
+**analysis_log re-runs use INSERT + UPDATE** — `save_analysis_log()` inserts on first run, then UPDATE on re-runs to refresh analysis fields while preserving `ml_status`/`ou_status` grading columns. Do not revert to INSERT OR IGNORE.
+
+**MLB /schedule linescore endpoint** — does NOT return `abbreviation` field, only `team_id`. Use `db.get_team_abbr_by_mlb_id(team_id)` to look up from `teams` table.
+
+**pitcher_game_logs / team_game_logs are forward-only** — `collect_boxscores()` runs nightly for yesterday only. If DB is empty, run `backfill_boxscores.py` (project root) to populate from Apr 1 through yesterday. Safe to re-run (INSERT OR IGNORE).
+
+**run_results() conn lifecycle** — conn is closed after pick grading, then reopened for mlb_to_local build. Any code added after the grading loop must call `db.get_connection()` fresh — do not reuse a closed conn.
+
+**SQLite date('now') is local time** — in tests use `datetime.now().isoformat()` (not `datetime.utcnow()`) for `created_at` inserts, or queries filtering by `date('now')` will miss the row.
+
+**get_today_sent_picks_with_game()** — joins `picks` + `games` to return `mlb_game_id` alongside pick fields. Use this (not the current run's `approved` list) when building the ML/O/U boards so picks sent in earlier runs are included.

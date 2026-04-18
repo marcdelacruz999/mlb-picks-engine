@@ -125,3 +125,19 @@ Pitching uses opponent-adjusted rolling ERA (`get_pitcher_rolling_stats_adjusted
 - Fetched via MLB API `lineups` hydrate (~3.5 hrs before game)
 - Both confirmed → "Lineups confirmed" in Discord notes
 - Not confirmed → "Lineup TBD — monitor before first pitch"
+
+---
+
+## Gotchas
+
+**All thresholds in config.py** — never hardcode in analysis.py. Optimizer reads config.py to tune values. Includes MIN_CONFIDENCE, MIN_EDGE_SCORE, MIN_EV, HOME_FIELD_ADVANTAGE, BULLPEN_ERA_RUST_THRESHOLD.
+
+**O/U confidence float cast** — K-rate nudge adds 0.5, bullpen nudge adds 1. Always cast with `int(round(conf))` not `int(conf)` to avoid truncation.
+
+**Wind direction is compass** — `_wind_direction_label()` returns `N/NE/E/SE/S/SW/W/NW`. Use in both `score_weather()` and `_project_score()`. Never use `"out to CF"` style strings.
+
+**fetch_venue_weather() is forecast-only** — Open-Meteo `/v1/forecast` only works for today + future. For historical dates use `fetch_venue_weather_archive()` (`archive-api.open-meteo.com/v1/archive`). `backfill_game_totals_weather()` calls the archive variant.
+
+**fetch_pitcher_stats() returns {} on no season stats** — pitcher hasn't started yet → `home_pitcher_stats` is `{}` → `home_p.get('name','?')` returns `'?'`. Always fall back to `game.get('home_pitcher_name')` (populated from `probablePitcher.fullName` in schedule fetch).
+
+**_parse_total_line() returns None on failure** — O/U grading pushes when total line can't be parsed or is out of range (5–15). If adding new O/U grading paths always guard: `if total_line is None: status = "push"`.
