@@ -630,6 +630,18 @@ def run_results():
                 break
 
         if not result:
+            # Check if game is postponed/cancelled — if so, void the pick
+            try:
+                status_url = f"https://statsapi.mlb.com/api/v1/game/{mlb_game_id}/linescore"
+                resp = requests.get(status_url, timeout=10)
+                if resp.ok:
+                    game_status = resp.json().get("gameStatus", {})
+                    detailed = game_status.get("detailedState", "")
+                    if detailed in ("Postponed", "Cancelled", "Suspended"):
+                        db.update_pick_status(pick["id"], "void")
+                        print(f"  ↩️  Pick {pick['id']} voided — game {mlb_game_id} is {detailed}")
+            except Exception:
+                pass
             continue
 
         # Grade the pick — cross-check score via boxscore endpoint
