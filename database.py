@@ -964,13 +964,19 @@ def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
             conn.execute("""
                 INSERT OR IGNORE INTO pitcher_game_logs
                 (mlb_game_id, game_date, pitcher_id, pitcher_name, team_id, is_starter,
-                 opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 opponent_team_id, innings_pitched, earned_runs, strikeouts, walks, hits, home_runs,
+                 pitch_count, batters_faced, ground_outs, fly_outs,
+                 inherited_runners, inherited_runners_scored, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (p["mlb_game_id"], p["game_date"], p["pitcher_id"], p["pitcher_name"],
                   p["team_id"], int(p["is_starter"]),
                   p.get("opponent_team_id"),
                   p["innings_pitched"], p["earned_runs"], p["strikeouts"],
-                  p["walks"], p["hits"], p["home_runs"], now))
+                  p["walks"], p["hits"], p["home_runs"],
+                  p.get("pitch_count", 0) or 0, p.get("batters_faced", 0) or 0,
+                  p.get("ground_outs", 0) or 0, p.get("fly_outs", 0) or 0,
+                  p.get("inherited_runners", 0) or 0, p.get("inherited_runners_scored", 0) or 0,
+                  now))
         except sqlite3.DatabaseError as e:
             print(f"[DB] store_boxscores pitcher error: {e}")
     for t in team_logs:
@@ -978,11 +984,17 @@ def store_boxscores(pitcher_logs: list, team_logs: list) -> None:
             conn.execute("""
                 INSERT OR IGNORE INTO team_game_logs
                 (mlb_game_id, game_date, team_id, is_away, runs, hits, home_runs,
-                 strikeouts, walks, at_bats, left_on_base, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                 strikeouts, walks, at_bats, left_on_base,
+                 pitching_strikeouts, pitching_walks, pitching_hits_allowed,
+                 pitching_earned_runs, pitching_home_runs_allowed, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (t["mlb_game_id"], t["game_date"], t["team_id"], int(t["is_away"]),
                   t["runs"], t["hits"], t["home_runs"], t["strikeouts"],
-                  t["walks"], t["at_bats"], t["left_on_base"], now))
+                  t["walks"], t["at_bats"], t["left_on_base"],
+                  t.get("pitching_strikeouts", 0) or 0, t.get("pitching_walks", 0) or 0,
+                  t.get("pitching_hits_allowed", 0) or 0, t.get("pitching_earned_runs", 0) or 0,
+                  t.get("pitching_home_runs_allowed", 0) or 0,
+                  now))
         except sqlite3.DatabaseError as e:
             print(f"[DB] store_boxscores team error: {e}")
     conn.commit()
@@ -1168,7 +1180,7 @@ def get_pitcher_pitch_count_rolling(pitcher_id: int, days: int = 21,
         SELECT pitch_count, game_date
         FROM pitcher_game_logs
         WHERE pitcher_id=? AND is_starter=1 AND game_date > ? AND pitch_count > 0
-        ORDER BY game_date ASC
+        ORDER BY game_date DESC
     """, (pitcher_id, cutoff.isoformat())).fetchall()
     conn.close()
     if not rows:

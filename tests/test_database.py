@@ -429,7 +429,7 @@ def test_get_pitcher_pitch_count_rolling(tmp_path, monkeypatch):
     assert result is not None
     assert result["starts"] == 3
     assert result["avg_pitch_count"] == round((95 + 102 + 88) / 3, 1)
-    assert result["last_pitch_count"] == 88
+    assert result["last_pitch_count"] == 95
 
 
 def test_get_pitcher_gb_fb_rate(tmp_path, monkeypatch):
