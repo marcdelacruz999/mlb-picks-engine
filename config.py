@@ -55,6 +55,24 @@ HOME_FIELD_ADVANTAGE = 0.04    # ~4% home-team win probability bump in composite
 BULLPEN_ERA_RUST_THRESHOLD = 5.0  # cap confidence at 6 when picked SP has ≥8d rest AND bullpen ERA > this
 
 # ──────────────────────────────────────────────
+# Expanded stat signals
+# ──────────────────────────────────────────────
+PITCH_COUNT_FATIGUE_THRESHOLD = 105      # pitches last start → fatigue flag
+PITCH_COUNT_FATIGUE_ADJ = 0.04          # score penalty per side
+GB_PCT_HIGH = 0.55                       # GB pitcher threshold
+GB_PCT_LOW = 0.35                        # FB pitcher threshold
+PARK_FACTOR_HITTER = 1.10               # park factor threshold for hitter's park
+PARK_FACTOR_PITCHER = 0.93              # park factor threshold for pitcher's park
+GB_PARK_ADJ = 0.03                      # GB/park interaction adjustment
+BULLPEN_IR_MIN_SAMPLE = 3               # min inherited runners for signal
+BULLPEN_STRAND_RATE_ELITE = 0.80        # elite strand rate threshold
+BULLPEN_STRAND_RATE_POOR = 0.50         # poor strand rate threshold
+BULLPEN_STRAND_ADJ = 0.05               # score adjustment for strand rate signal
+SB_MIN_GAMES = 5                        # min games for stolen base signal
+SB_PER_GAME_THRESHOLD = 1.5             # SB/game threshold for speed signal
+SB_SPEED_ADJ = 0.04                     # score adjustment for speed signal
+
+# ──────────────────────────────────────────────
 # Decision Model Weights  (must sum to 1.0)
 # ──────────────────────────────────────────────
 WEIGHTS = {

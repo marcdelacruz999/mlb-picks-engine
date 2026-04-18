@@ -5,7 +5,7 @@ Implements the weighted decision model with all 7 agents.
 Produces confidence scores, win probabilities, and pick recommendations.
 """
 
-from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP, F5_PITCHING_THRESHOLD, F5_BULLPEN_THRESHOLD, HOME_FIELD_ADVANTAGE, BULLPEN_ERA_RUST_THRESHOLD
+from config import WEIGHTS, MIN_CONFIDENCE, MIN_CONFIDENCE_OU, MIN_EDGE_SCORE, MAX_PICKS_PER_DAY, PARK_FACTORS, UMPIRE_TENDENCIES, MIN_EV, MIN_BATTER_GAMES, OU_K_RATE_THRESHOLD_HIGH, OU_K_RATE_THRESHOLD_LOW, OU_CONVICTION_GAP, F5_PITCHING_THRESHOLD, F5_BULLPEN_THRESHOLD, HOME_FIELD_ADVANTAGE, BULLPEN_ERA_RUST_THRESHOLD, PITCH_COUNT_FATIGUE_THRESHOLD, PITCH_COUNT_FATIGUE_ADJ, GB_PCT_HIGH, GB_PCT_LOW, PARK_FACTOR_HITTER, PARK_FACTOR_PITCHER, GB_PARK_ADJ, BULLPEN_IR_MIN_SAMPLE, BULLPEN_STRAND_RATE_ELITE, BULLPEN_STRAND_RATE_POOR, BULLPEN_STRAND_ADJ, SB_MIN_GAMES, SB_PER_GAME_THRESHOLD, SB_SPEED_ADJ
 from data_odds import implied_probability, find_value
 from data_mlb import fetch_lineup_batting
 import database as _analysis_db
@@ -202,6 +202,38 @@ def score_pitching(game: dict) -> dict:
     if matchup_notes:
         edge += f" | {matchup_notes[0]}"
 
+    # ── Pitch count fatigue supplement ──
+    for _pid, _direction in [(home_pitcher_id, 1), (away_pitcher_id, -1)]:
+        if not _pid:
+            continue
+        try:
+            _pc = _analysis_db.get_pitcher_pitch_count_rolling(_pid, days=21)
+        except Exception:
+            _pc = None
+        if _pc and _pc["last_pitch_count"] >= PITCH_COUNT_FATIGUE_THRESHOLD:
+            score = _clamp(score - PITCH_COUNT_FATIGUE_ADJ * _direction)
+            _side = "Home" if _direction == 1 else "Away"
+            edge += f" | {_side} SP high pitch load ({_pc['last_pitch_count']}p last start)"
+
+    # ── GB/FB tendency × park factor ──
+    try:
+        _park = PARK_FACTORS.get(_analysis_db.get_team_abbr_by_mlb_id(game.get("home_team_mlb_id", 0)), 1.0)
+    except Exception:
+        _park = 1.0
+    for _pid, _direction in [(home_pitcher_id, 1), (away_pitcher_id, -1)]:
+        if not _pid:
+            continue
+        try:
+            _gb = _analysis_db.get_pitcher_gb_fb_rate(_pid, days=21)
+        except Exception:
+            _gb = None
+        if not _gb or _gb["gb_pct"] is None:
+            continue
+        if _gb["gb_pct"] >= GB_PCT_HIGH and _park >= PARK_FACTOR_HITTER:
+            score = _clamp(score - GB_PARK_ADJ * _direction)
+        elif _gb["gb_pct"] <= GB_PCT_LOW and _park <= PARK_FACTOR_PITCHER:
+            score = _clamp(score + GB_PARK_ADJ * _direction)
+
     # Note when splits or rolling are active
     notes_parts = []
     if away_splits.get("away_era") or home_splits.get("home_era"):
@@ -360,6 +392,19 @@ def score_offense(game: dict) -> dict:
     if hot_cold_notes:
         edge += f" | {'; '.join(hot_cold_notes)}"
 
+    # ── Stolen base speed signal ──
+    for _tid, _direction in [(game.get("home_team_mlb_id"), 1), (game.get("away_team_mlb_id"), -1)]:
+        if not _tid:
+            continue
+        try:
+            _sb = _analysis_db.get_team_stolen_base_rate(_tid, days=14)
+        except Exception:
+            _sb = None
+        if not _sb or _sb["games"] < SB_MIN_GAMES:
+            continue
+        if _sb["sb_per_game"] >= SB_PER_GAME_THRESHOLD:
+            score = _clamp(score + SB_SPEED_ADJ * _direction)
+
     return {
         "score": round(score, 3),
         "edge": edge,
@@ -483,6 +528,25 @@ def score_bullpen(game: dict) -> dict:
 
     if key_rel_notes:
         edge += " | " + " | ".join(key_rel_notes)
+
+    # ── Bullpen inherited runner strand rate ──
+    for _tid, _direction in [(game.get("home_team_mlb_id"), 1), (game.get("away_team_mlb_id"), -1)]:
+        if not _tid:
+            continue
+        try:
+            _ir = _analysis_db.get_bullpen_inherited_runner_rate(_tid, days=14)
+        except Exception:
+            _ir = None
+        if not _ir or _ir["inherited_runners"] < BULLPEN_IR_MIN_SAMPLE:
+            continue
+        if _ir["strand_rate"] >= BULLPEN_STRAND_RATE_ELITE:
+            score = _clamp(score + BULLPEN_STRAND_ADJ * _direction)
+            _side = "Home" if _direction == 1 else "Away"
+            edge += f" | {_side} bullpen elite strand rate ({_ir['strand_rate']:.0%})"
+        elif _ir["strand_rate"] <= BULLPEN_STRAND_RATE_POOR:
+            score = _clamp(score - BULLPEN_STRAND_ADJ * _direction)
+            _side = "Home" if _direction == 1 else "Away"
+            edge += f" | {_side} bullpen poor strand rate ({_ir['strand_rate']:.0%})"
 
     return {
         "score": round(score, 3),
