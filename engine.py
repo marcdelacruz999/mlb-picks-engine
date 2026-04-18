@@ -242,10 +242,11 @@ def run_analysis(dry_run: bool = False):
 
     # ── Daily ML Model Board (send/update every 1 hour) ──
     today = date.today().isoformat()
+    sent_picks = db.get_today_sent_picks_with_game()
     if db.board_needs_update(today, interval_hours=1):
         board_record = db.get_daily_board(today)
         existing_id = board_record["message_id"] if board_record else None
-        message_id = send_daily_board(analyses, existing_message_id=existing_id)
+        message_id = send_daily_board(analyses, existing_message_id=existing_id, approved=sent_picks)
         if message_id:
             db.save_daily_board(today, message_id)
 
@@ -253,7 +254,7 @@ def run_analysis(dry_run: bool = False):
     if db.ou_board_needs_update(today, interval_hours=1):
         ou_board_record = db.get_daily_ou_board(today)
         existing_ou_id = ou_board_record["message_id"] if ou_board_record else None
-        ou_message_id = send_ou_board(analyses, existing_message_id=existing_ou_id)
+        ou_message_id = send_ou_board(analyses, existing_message_id=existing_ou_id, approved=sent_picks)
         if ou_message_id:
             db.save_daily_ou_board(today, ou_message_id)
 

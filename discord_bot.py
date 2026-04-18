@@ -375,10 +375,10 @@ def _format_nightly_report(
 
     roi_str = f"+{roi}%" if roi > 0 else f"{roi}%"
 
-    lines = [f"⚾ **MLB NIGHTLY REPORT — {today}**", ""]
+    lines = [f"⚾ MLB NIGHTLY REPORT — {today}", ""]
 
     # ── Section 1: Confidence Picks ──────────────────────────
-    lines.append("🎯 **CONFIDENCE PICKS**  ━━━━━━━━━━━━━━━━━━━━")
+    lines.append("🎯 CONFIDENCE PICKS  ━━━━━━━━━━━━━━━━━━━━")
 
     sent_any = False
     for entry in sorted(log_entries, key=lambda e: e.get("ml_confidence", 0), reverse=True):
@@ -411,11 +411,13 @@ def _format_nightly_report(
         else:
             score_str = f"{away_sc}-{home_sc}"
 
-        status = entry.get("ml_status", "pending")
-        if status == "correct":
+        # Use picks table status (ground truth) not analysis_log ml_status,
+        # since the sent pick may differ from the raw model call stored in analysis_log.
+        pick_status = pick.get("status", "pending")
+        if pick_status == "won":
             result_emoji = "✅"
             result_word = "WON"
-        elif status == "incorrect":
+        elif pick_status == "lost":
             result_emoji = "❌"
             result_word = "LOST"
         else:
@@ -426,7 +428,7 @@ def _format_nightly_report(
         lines.append(
             f"{result_emoji} {away_short} @ {home_short}  →  "
             f"{pick_short} {pick_type_label}{odds_str}  {int(win_prob)}% · {conf}/10  "
-            f"{score_str}  **{result_word}**"
+            f"{score_str}  {result_word}"
         )
         sent_any = True
 
@@ -455,7 +457,7 @@ def _format_nightly_report(
     lines.append("")
 
     # ── Section 2: ML Board ──────────────────────────────────
-    lines.append("📋 **ML BOARD**  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("📋 ML BOARD  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     sorted_entries = sorted(log_entries, key=lambda e: e.get("ml_confidence", 0), reverse=True)
     for entry in sorted_entries:
@@ -569,7 +571,7 @@ def _format_nightly_report(
         )
 
     if ou_lines:
-        lines.append("🎰 **O/U BOARD**  ━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("🎰 O/U BOARD  ━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         lines.extend(ou_lines)
         ou_total = ou_correct + ou_incorrect
         ou_pct = round(ou_correct / ou_total * 100, 1) if ou_total > 0 else 0
@@ -622,10 +624,17 @@ def send_nightly_report(
 #  WEBHOOK PAYLOAD EXPORT (for debugging)
 # ══════════════════════════════════════════════
 
-def _format_daily_board(analyses: list) -> str:
+def _format_daily_board(analyses: list, approved: Optional[list] = None) -> str:
     """Format the full ML model board for all games today."""
     today = date.today().strftime("%B %d, %Y")
     pt_now = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%-I:%M %p PT")
+
+    # Index approved picks by mlb_game_id for O(1) lookup
+    approved_by_game: dict = {}
+    for p in (approved or []):
+        mid = p.get("mlb_game_id")
+        if mid:
+            approved_by_game[mid] = p
 
     lines = [
         f"⚾ **MLB ML PICKS — {today}**",
@@ -633,20 +642,31 @@ def _format_daily_board(analyses: list) -> str:
         f"",
     ]
 
-    # Sort by confidence descending
-    sorted_analyses = sorted(analyses, key=lambda a: a.get("ml_confidence", 0), reverse=True)
+    # Sort by confidence descending, using sent pick confidence when available
+    def _sort_key(a):
+        p = approved_by_game.get(a.get("mlb_game_id"))
+        return p["confidence"] if p and p["pick_type"] in ("moneyline", "f5_ml") else a.get("ml_confidence", 0)
+
+    sorted_analyses = sorted(analyses, key=_sort_key, reverse=True)
 
     for a in sorted_analyses:
-        conf = a.get("ml_confidence", 0)
-        pick_team = a.get("ml_pick_team", "?")
         away = a.get("away_team", "?")
         home = a.get("home_team", "?")
-
         away_short = away.split()[-1] if away else "?"
         home_short = home.split()[-1] if home else "?"
+
+        sent = approved_by_game.get(a.get("mlb_game_id"))
+        if sent and sent["pick_type"] in ("moneyline", "f5_ml"):
+            pick_team = sent["pick_team"]
+            conf = sent["confidence"]
+            flag = " 🎯"
+        else:
+            pick_team = a.get("ml_pick_team", "?")
+            conf = a.get("ml_confidence", 0)
+            flag = ""
+
         pick_short = pick_team.split()[-1] if pick_team else "?"
 
-        # Emoji tier
         if conf >= 8:
             tier = "🔥"
         elif conf >= 7:
@@ -656,7 +676,7 @@ def _format_daily_board(analyses: list) -> str:
         else:
             tier = "⚠️"
 
-        lines.append(f"{tier} {away_short} @ {home_short} · 👉 {pick_short} · {conf}/10")
+        lines.append(f"{tier} {away_short} @ {home_short} · 👉 {pick_short} · {conf}/10{flag}")
 
     lines.append("")
     lines.append("🔥 Strong (8-10) · ✅ Qualified (7) · ➡️ Below threshold · ⚠️ Lean only")
@@ -664,18 +684,19 @@ def _format_daily_board(analyses: list) -> str:
     return "\n".join(lines)
 
 
-def send_daily_board(analyses: list, existing_message_id: Optional[str] = None) -> Optional[str]:
+def send_daily_board(analyses: list, existing_message_id: Optional[str] = None, approved: Optional[list] = None) -> Optional[str]:
     """
     Send or update the daily ML model board on Discord.
     If existing_message_id is provided, patches the existing message in-place.
+    Pass approved picks so the board reflects sent picks rather than raw model calls.
     Returns the Discord message ID on success, None on failure.
     """
     if not DISCORD_WEBHOOK_URL:
         print("[DISCORD] No webhook URL — printing board locally.")
-        print(_format_daily_board(analyses))
+        print(_format_daily_board(analyses, approved))
         return None
 
-    content = _format_daily_board(analyses)
+    content = _format_daily_board(analyses, approved)
     payload = {"content": content}
 
     try:
@@ -707,10 +728,18 @@ def send_daily_board(analyses: list, existing_message_id: Optional[str] = None) 
         return None
 
 
-def _format_ou_board(analyses: list) -> str:
+def _format_ou_board(analyses: list, approved: Optional[list] = None) -> str:
     """Format the full O/U model board for all games today."""
     today = date.today().strftime("%B %d, %Y")
     pt_now = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%-I:%M %p PT")
+
+    # Index sent O/U picks by mlb_game_id
+    approved_ou: dict = {}
+    for p in (approved or []):
+        if p.get("pick_type") in ("over", "under"):
+            mid = p.get("mlb_game_id")
+            if mid:
+                approved_ou[mid] = p
 
     lines = [
         f"🎯 **MLB O/U PICKS — {today}**",
@@ -718,23 +747,30 @@ def _format_ou_board(analyses: list) -> str:
         f"",
     ]
 
-    # Sort by O/U confidence descending
-    sorted_analyses = sorted(
-        analyses,
-        key=lambda a: (a.get("ou_pick") or {}).get("confidence", 0),
-        reverse=True
-    )
+    def _ou_sort_key(a):
+        p = approved_ou.get(a.get("mlb_game_id"))
+        return p["confidence"] if p else (a.get("ou_pick") or {}).get("confidence", 0)
+
+    sorted_analyses = sorted(analyses, key=_ou_sort_key, reverse=True)
 
     for a in sorted_analyses:
-        ou = a.get("ou_pick") or {}
-        conf = ou.get("confidence", 0)
-        pick = ou.get("pick")        # "over" / "under" / None
-        line = ou.get("total_line")
         away = a.get("away_team", "?")
         home = a.get("home_team", "?")
-
         away_short = away.split()[-1] if away else "?"
         home_short = home.split()[-1] if home else "?"
+
+        sent = approved_ou.get(a.get("mlb_game_id"))
+        if sent:
+            pick = sent["pick_type"]          # "over" / "under"
+            line = sent.get("notes", "").replace("Total line: ", "").split("|")[0].strip() or None
+            conf = sent["confidence"]
+            flag = " 🎯"
+        else:
+            ou = a.get("ou_pick") or {}
+            pick = ou.get("pick")
+            line = ou.get("total_line")
+            conf = ou.get("confidence", 0)
+            flag = ""
 
         if conf >= 9:
             tier = "🔥"
@@ -753,7 +789,7 @@ def _format_ou_board(analyses: list) -> str:
             pick_str = "👉 No pick"
 
         conf_str = f"{conf}/10" if conf else "—"
-        lines.append(f"{tier} {away_short} @ {home_short} · {pick_str} · {conf_str}")
+        lines.append(f"{tier} {away_short} @ {home_short} · {pick_str} · {conf_str}{flag}")
 
     lines.append("")
     lines.append("🔥 9-10 · ✅ 7-8 · ➡️ 6 · ⚠️ ≤5")
@@ -761,14 +797,14 @@ def _format_ou_board(analyses: list) -> str:
     return "\n".join(lines)
 
 
-def send_ou_board(analyses: list, existing_message_id: Optional[str] = None) -> Optional[str]:
+def send_ou_board(analyses: list, existing_message_id: Optional[str] = None, approved: Optional[list] = None) -> Optional[str]:
     """Send or update the daily O/U board to Discord. Returns message ID."""
     if not DISCORD_WEBHOOK_URL:
         print("[DISCORD] No webhook URL — printing O/U board locally.")
-        print(_format_ou_board(analyses))
+        print(_format_ou_board(analyses, approved))
         return None
 
-    content = _format_ou_board(analyses)
+    content = _format_ou_board(analyses, approved)
     payload = {"content": content}
 
     try:
