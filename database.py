@@ -550,6 +550,14 @@ def save_pick(pick: dict) -> int:
     return pick_id
 
 
+def delete_pick(pick_id: int) -> None:
+    """Remove a pick row that failed to send to Discord."""
+    conn = get_connection()
+    conn.execute("DELETE FROM picks WHERE id=?", (pick_id,))
+    conn.commit()
+    conn.close()
+
+
 def pick_already_sent_today(game_id: int, pick_type: str) -> bool:
     """Return True if a discord-sent pick already exists today for this game + pick type."""
     conn = get_connection()

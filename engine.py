@@ -235,6 +235,9 @@ def run_analysis(dry_run: bool = False):
         message_id = send_pick(pick)
         if message_id:
             db.mark_pick_sent(pick_id, message_id=message_id)
+        else:
+            db.delete_pick(pick_id)
+            print(f"  ⚠️  Discord send failed for {pick.get('game', '?')} — pick removed, will retry next run")
 
         # Print webhook payload for reference
         print(f"\n  📦 Webhook payload for: {pick['game']}")
