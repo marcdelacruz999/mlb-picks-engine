@@ -11,7 +11,7 @@
 |------|---------|--------------|
 | 8:00 AM–5:00 PM (hourly) | `engine.py` | Full re-analysis every hour — 10 separate plists (run-8 through run-17) |
 | Every 30 min | `monitor.py` | Pitcher scratch monitor — Discord alert on SP change |
-| 11:00 PM | `engine.py --results` | Grades picks vs final scores; collects boxscores, game totals, batter logs |
+| 11:00 PM | `engine.py --results` | Grades picks vs final scores; collects boxscores (pitch count, GB/FB, inherited runners, team pitching), game totals, batter logs |
 | 11:30 PM | `optimizer.py` | Nightly optimizer — one improvement per run (7-day code cooldown) |
 | 1:45 AM | `export_db_snapshot.py` | Exports DB to `DB_SNAPSHOT.md`, commits + pushes for 2 AM CEO agent |
 | Monday 7:00 AM | `calibrate.py` | Weekly signal calibration — posts Discord report, optionally applies weights |
